@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { IconLumen, IconPlus, IconTrash, IconBook, IconSparkles, IconLayers, IconLoader } from './Icons';
+import { IconLumen, IconPlus, IconTrash, IconBook, IconSparkles, IconLayers, IconLoader, IconGoogle } from './Icons';
 
 export default function NotebooksDashboard({
   notebooks = [],
@@ -80,13 +80,34 @@ export default function NotebooksDashboard({
       {/* Notebooks Grid */}
       <div className="notebooks-grid">
         {notebooks.length === 0 ? (
-          <div className="empty-dashboard-card" onClick={handleOpenCreateModal}>
-            <div className="empty-icon-wrap">
-              <IconPlus size={28} />
+          !user ? (
+            <div className="empty-dashboard-card" onClick={handleOpenCreateModal}>
+              <div className="empty-icon-wrap">
+                <IconGoogle size={28} />
+              </div>
+              <h3>Sign in with Google to view your notebooks</h3>
+              <p>Sign in to save, organize, and access your research notebooks and grounded AI chats.</p>
+              <button
+                type="button"
+                className="btn-primary"
+                style={{ marginTop: '14px', gap: '8px' }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (onGoogleSignIn) onGoogleSignIn();
+                }}
+              >
+                <IconGoogle size={15} /> Sign in with Google
+              </button>
             </div>
-            <h3>Create your first notebook</h3>
-            <p>Upload research papers, YouTube videos, or articles and synthesize with Groq LPU.</p>
-          </div>
+          ) : (
+            <div className="empty-dashboard-card" onClick={handleOpenCreateModal}>
+              <div className="empty-icon-wrap">
+                <IconPlus size={28} />
+              </div>
+              <h3>Create your first notebook</h3>
+              <p>Upload research papers, YouTube videos, or articles and synthesize with Groq LPU.</p>
+            </div>
+          )
         ) : (
           notebooks.map((nb) => (
             <div
@@ -99,11 +120,15 @@ export default function NotebooksDashboard({
                   <IconBook size={20} />
                 </div>
                 <button
+                  type="button"
                   className="notebook-delete-btn"
                   title="Delete notebook"
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onMouseDown={(e) => e.stopPropagation()}
                   onClick={(e) => {
+                    e.preventDefault();
                     e.stopPropagation();
-                    if (confirm(`Delete notebook "${nb.title}"?`)) {
+                    if (window.confirm(`Delete notebook "${nb.title}"?`)) {
                       onDeleteNotebook(nb.id);
                     }
                   }}

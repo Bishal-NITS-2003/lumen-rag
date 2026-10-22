@@ -76,10 +76,29 @@ def list_notebooks(
     db: Session = Depends(get_db),
     x_user_id: Optional[str] = Header(None, alias="X-User-Id")
 ):
-    query = db.query(Notebook)
-    if x_user_id:
-        query = query.filter((Notebook.user_id == x_user_id) | (Notebook.user_id == None))
-    notebooks = query.order_by(Notebook.updated_at.desc()).all()
+    # Strict isolation: If user is logged out, return empty list
+    if not x_user_id or not x_user_id.strip():
+        return []
+
+    # Assign any legacy unassigned notebooks (NULL user_id) to this user so data isn't lost
+    try:
+        orphan_count = db.query(Notebook).filter(Notebook.user_id == None).count()
+        if orphan_count > 0:
+            db.query(Notebook).filter(Notebook.user_id == None).update(
+                {Notebook.user_id: x_user_id.strip()},
+                synchronize_session=False
+            )
+            db.commit()
+    except Exception as e:
+        logger.warning(f"Error migrating legacy notebooks: {e}")
+        db.rollback()
+
+    notebooks = (
+        db.query(Notebook)
+        .filter(Notebook.user_id == x_user_id.strip())
+        .order_by(Notebook.updated_at.desc())
+        .all()
+    )
     results = []
     for nb in notebooks:
         results.append(NotebookResponse(
@@ -188,18 +207,44 @@ def update_notebook(notebook_id: str, payload: NotebookUpdate, db: Session = Dep
 
 
 @app.delete("/api/notebooks/{notebook_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_notebook(notebook_id: str, db: Session = Depends(get_db)):
-    nb = db.query(Notebook).filter(Notebook.id == notebook_id).first()
+def delete_notebook(
+    notebook_id: str,
+    db: Session = Depends(get_db),
+    x_user_id: Optional[str] = Header(None, alias="X-User-Id")
+):
+    query = db.query(Notebook).filter(Notebook.id == notebook_id)
+    if x_user_id:
+        query = query.filter((Notebook.user_id == x_user_id) | (Notebook.user_id == None))
+    nb = query.first()
     if not nb:
         raise HTTPException(status_code=404, detail="Notebook not found")
+
+    # 1. Clean up vector embeddings & S3/local files for all sources
     for src in nb.sources:
         try:
             delete_source_index(notebook_id, src.id)
+        except Exception as e:
+            logger.warning(f"Error cleaning vectors for source {src.id}: {e}")
+        try:
             storage_service.delete_file(s3_key=src.s3_key, file_path=src.file_path)
         except Exception as e:
-            logger.warning(f"Error cleaning source {src.id} during notebook delete: {e}")
-    db.delete(nb)
-    db.commit()
+            logger.warning(f"Error cleaning file for source {src.id}: {e}")
+
+    # 2. Explicitly delete all child records to guarantee DB constraint safety across engines
+    try:
+        db.query(DocumentChunk).filter(DocumentChunk.notebook_id == notebook_id).delete(synchronize_session=False)
+        db.query(ChatMessage).filter(ChatMessage.notebook_id == notebook_id).delete(synchronize_session=False)
+        db.query(NotebookNote).filter(NotebookNote.notebook_id == notebook_id).delete(synchronize_session=False)
+        db.query(StudioNote).filter(StudioNote.notebook_id == notebook_id).delete(synchronize_session=False)
+        db.query(Source).filter(Source.notebook_id == notebook_id).delete(synchronize_session=False)
+
+        db.delete(nb)
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Failed to delete notebook {notebook_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to delete notebook: {str(e)}")
+
     return None
 
 

@@ -54,7 +54,11 @@ export default function App() {
 
   // Fetch notebooks when user changes
   useEffect(() => {
-    fetchNotebooks(user?.uid);
+    if (user?.uid) {
+      fetchNotebooks(user.uid);
+    } else {
+      setNotebooks([]);
+    }
     fetchHealth();
   }, [user]);
 
@@ -66,15 +70,22 @@ export default function App() {
   };
 
   const fetchNotebooks = async (userId = user?.uid) => {
+    if (!userId) {
+      setNotebooks([]);
+      return;
+    }
     try {
-      const headers = {};
-      if (userId) headers['X-User-Id'] = userId;
+      const headers = { 'X-User-Id': userId };
       const res = await fetch('/api/notebooks', { headers });
       if (res.ok) {
         const data = await res.json();
         setNotebooks(data);
+      } else {
+        setNotebooks([]);
       }
-    } catch {}
+    } catch {
+      setNotebooks([]);
+    }
   };
 
   const loadNotebookDetail = async (id) => {
@@ -114,10 +125,10 @@ export default function App() {
     try {
       await logOut();
       setUser(null);
+      setNotebooks([]);
       setCurrentNotebook(null);
       setCurrentNotebookId(null);
       setView('dashboard');
-      fetchNotebooks(null);
     } catch (err) {
       console.error('Sign out error:', err);
     }
@@ -147,15 +158,32 @@ export default function App() {
   };
 
   const handleDeleteNotebook = async (id) => {
+    // Optimistically remove from state immediately for instant feedback
+    const previous = [...notebooks];
+    setNotebooks(prev => prev.filter(n => n.id !== id));
+    if (currentNotebookId === id) {
+      setView('dashboard');
+      setCurrentNotebook(null);
+      setCurrentNotebookId(null);
+    }
+
     try {
-      await fetch(`/api/notebooks/${id}`, { method: 'DELETE' });
-      setNotebooks(prev => prev.filter(n => n.id !== id));
-      if (currentNotebookId === id) {
-        setView('dashboard');
-        setCurrentNotebook(null);
-        setCurrentNotebookId(null);
+      const headers = {};
+      if (user?.uid) headers['X-User-Id'] = user.uid;
+      const res = await fetch(`/api/notebooks/${id}`, {
+        method: 'DELETE',
+        headers
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.detail || 'Failed to delete notebook');
       }
-    } catch {}
+    } catch (err) {
+      console.error('Failed to delete notebook:', err);
+      // Revert if backend error
+      setNotebooks(previous);
+      alert(`Could not delete notebook: ${err.message}`);
+    }
   };
 
   const handleSaveTitle = async () => {
