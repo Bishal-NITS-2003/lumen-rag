@@ -2,10 +2,13 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# System dependencies for chromadb, sentence-transformers, BeautifulSoup
+# System dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc g++ libffi-dev curl \
     && rm -rf /var/lib/apt/lists/*
+
+# Pre-install lightweight CPU-only PyTorch (180MB vs 4.5GB CUDA) to prevent "No space left on device"
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
