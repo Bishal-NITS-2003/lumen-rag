@@ -1,28 +1,35 @@
 import React, { useState, useEffect } from 'react';
-import Sidebar from './components/Sidebar';
-import ChatArea from './components/ChatArea';
+import {
+  IconLumen, IconArrowLeft, IconSun, IconMoon, IconSparkles,
+  IconEdit, IconDatabase, IconBook
+} from './components/Icons';
+import NotebooksDashboard from './components/NotebooksDashboard';
+import SourcesPanel from './components/SourcesPanel';
+import ChatPanel from './components/ChatPanel';
+import StudioPanel from './components/StudioPanel';
+import AddSourceModal from './components/AddSourceModal';
+import SourceViewerModal from './components/SourceViewerModal';
+import NoteViewerModal from './components/NoteViewerModal';
 
 export default function App() {
-  const [sessions, setSessions] = useState([]);
-  const [currentSessionId, setCurrentSessionId] = useState(() => 'sess_' + Math.random().toString(36).substring(2, 10));
-  const [currentSession, setCurrentSession] = useState({
-    session_id: '',
-    title: 'New Research',
-    is_indexed: false,
-    indexed_sources: [],
-    chat_history: []
-  });
+  const [view, setView] = useState('dashboard'); // 'dashboard' | 'notebook'
+  const [notebooks, setNotebooks] = useState([]);
+  const [currentNotebookId, setCurrentNotebookId] = useState(null);
+  const [currentNotebook, setCurrentNotebook] = useState(null);
 
-  const [searchState, setSearchState] = useState(null);
-  const [isSearching, setIsSearching] = useState(false);
-  const [isIndexing, setIsIndexing] = useState(false);
-  const [isAnswering, setIsAnswering] = useState(false);
-  const [lastPrompt, setLastPrompt] = useState('');
+  const [systemHealth, setSystemHealth] = useState(null);
+  const [isLoadingChat, setIsLoadingChat] = useState(false);
 
-  // Live indexing activity log
-  const [indexingLogs, setIndexingLogs] = useState([]);
+  // Modals
+  const [isAddSourceOpen, setIsAddSourceOpen] = useState(false);
+  const [viewingSourceId, setViewingSourceId] = useState(null);
+  const [viewingNote, setViewingNote] = useState(null);
 
-  // Dark mode — persist in localStorage
+  // Title Editing
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [editableTitle, setEditableTitle] = useState('');
+
+  // Dark mode
   const [darkMode, setDarkMode] = useState(() => {
     try { return localStorage.getItem('lumen-dark') === 'true'; } catch { return false; }
   });
@@ -32,199 +39,326 @@ export default function App() {
     try { localStorage.setItem('lumen-dark', darkMode); } catch {}
   }, [darkMode]);
 
-  useEffect(() => { fetchSessions(); }, []);
-
   useEffect(() => {
-    if (currentSessionId) loadSessionDetails(currentSessionId);
-  }, [currentSessionId]);
+    fetchNotebooks();
+    fetchHealth();
+  }, []);
 
-  const fetchSessions = async () => {
+  const fetchHealth = async () => {
     try {
-      const r = await fetch('/api/sessions');
-      if (r.ok) setSessions(await r.json());
+      const res = await fetch('/api/health');
+      if (res.ok) setSystemHealth(await res.json());
     } catch {}
   };
 
-  const loadSessionDetails = async (sid) => {
+  const fetchNotebooks = async () => {
     try {
-      const r = await fetch(`/api/sessions/${sid}`);
-      if (r.ok) {
-        const data = await r.json();
-        setCurrentSession(data);
-        if (data.is_indexed) setSearchState(null);
+      const res = await fetch('/api/notebooks');
+      if (res.ok) {
+        const data = await res.json();
+        setNotebooks(data);
       }
     } catch {}
   };
 
-  const handleNewChat = () => {
-    const id = 'sess_' + Math.random().toString(36).substring(2, 10);
-    setCurrentSessionId(id);
-    setCurrentSession({ session_id: id, title: 'New Research', is_indexed: false, indexed_sources: [], chat_history: [] });
-    setSearchState(null);
-    setIndexingLogs([]);
-    setLastPrompt('');
-  };
-
-  const handleDeleteSession = async (sid) => {
+  const loadNotebookDetail = async (id) => {
     try {
-      await fetch(`/api/sessions/${sid}`, { method: 'DELETE' });
-      setSessions(prev => prev.filter(s => s.session_id !== sid));
-      if (currentSessionId === sid) handleNewChat();
+      const res = await fetch(`/api/notebooks/${id}`);
+      if (res.ok) {
+        const data = await res.json();
+        setCurrentNotebook(data);
+        setEditableTitle(data.title);
+      }
     } catch {}
   };
 
-  const handleGenerateSources = async (prompt) => {
-    setLastPrompt(prompt);
-    setIsSearching(true);
-    setSearchState(null);
+  const handleSelectNotebook = (id) => {
+    setCurrentNotebookId(id);
+    setView('notebook');
+    loadNotebookDetail(id);
+  };
+
+  const handleCreateNotebook = async (title) => {
     try {
-      const r = await fetch('/api/search', {
+      const res = await fetch('/api/notebooks', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ session_id: currentSessionId, prompt })
+        body: JSON.stringify({ title })
       });
-      if (!r.ok) {
-        const e = await r.json().catch(() => ({}));
-        throw new Error(e.detail || `Error ${r.status}`);
+      if (res.ok) {
+        const newNb = await res.json();
+        setNotebooks(prev => [newNb, ...prev]);
+        handleSelectNotebook(newNb.id);
       }
-      const data = await r.json();
-      setSearchState({ ...data, selected_items: [] });
-      setCurrentSession(prev => ({ ...prev, title: prompt.substring(0, 36) }));
-      fetchSessions();
     } catch (err) {
-      alert(`Search failed: ${err.message}`);
-    } finally {
-      setIsSearching(false);
+      alert(`Could not create notebook: ${err.message}`);
     }
   };
 
-  const handleToggleSource = (item) => {
-    if (!searchState) return;
-    setSearchState(prev => {
-      const exists = prev.selected_items.some(s => s.link === item.link);
-      if (!exists && prev.selected_items.length >= 5) {
-        alert('Max 5 sources. Deselect one to swap.');
-        return prev;
+  const handleDeleteNotebook = async (id) => {
+    try {
+      await fetch(`/api/notebooks/${id}`, { method: 'DELETE' });
+      setNotebooks(prev => prev.filter(n => n.id !== id));
+      if (currentNotebookId === id) {
+        setView('dashboard');
+        setCurrentNotebook(null);
+        setCurrentNotebookId(null);
       }
-      const updated = exists
-        ? prev.selected_items.filter(s => s.link !== item.link)
-        : [...prev.selected_items, item];
-      return { ...prev, selected_items: updated };
-    });
+    } catch {}
   };
 
-  const handleIndexSources = async () => {
-    if (!searchState || searchState.selected_items.length === 0) return;
-    setIsIndexing(true);
-    setIndexingLogs([]);
-
-    // Build synthetic live log from selected items
-    const items = searchState.selected_items;
-    const logInterval = setInterval(() => {
-      setIndexingLogs(prev => {
-        if (prev.length < items.length) {
-          const item = items[prev.length];
-          return [...prev, {
-            ok: false,
-            text: item.type === 'youtube'
-              ? `Fetching transcript: "${item.title.substring(0, 48)}…"`
-              : `Scraping article: "${item.title.substring(0, 48)}…"`
-          }];
-        }
-        clearInterval(logInterval);
-        return prev;
-      });
-    }, 800);
-
+  const handleSaveTitle = async () => {
+    if (!editableTitle.trim() || editableTitle === currentNotebook?.title) {
+      setIsEditingTitle(false);
+      return;
+    }
     try {
-      const r = await fetch('/api/index-sources', {
-        method: 'POST',
+      const res = await fetch(`/api/notebooks/${currentNotebookId}`, {
+        method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ session_id: currentSessionId, selected_items: items })
+        body: JSON.stringify({ title: editableTitle.trim() })
       });
-      if (!r.ok) {
-        const e = await r.json().catch(() => ({}));
-        throw new Error(e.detail || `Error ${r.status}`);
+      if (res.ok) {
+        const updated = await res.json();
+        setCurrentNotebook(prev => ({ ...prev, title: updated.title }));
+        setNotebooks(prev => prev.map(n => n.id === currentNotebookId ? { ...n, title: updated.title } : n));
       }
-      const data = await r.json();
-      clearInterval(logInterval);
-      setIndexingLogs(items.map(i => ({ ok: true, text: `Indexed: ${i.title.substring(0, 52)}` })));
-
-      setCurrentSession(prev => ({
-        ...prev,
-        is_indexed: true,
-        indexed_sources: data.sources,
-        chat_history: [{
-          role: 'assistant',
-          content: `Knowledge base built from ${data.indexed_count} source${data.indexed_count !== 1 ? 's' : ''} — ${data.chunks_count} chunks ready.\n\nWhat would you like to know?`
-        }]
-      }));
-      setSearchState(null);
-      fetchSessions();
-    } catch (err) {
-      clearInterval(logInterval);
-      alert(`Indexing failed: ${err.message}`);
-    } finally {
-      setIsIndexing(false);
+    } catch {}
+    finally {
+      setIsEditingTitle(false);
     }
   };
 
-  const handleSendMessage = async (msgText) => {
-    if (!msgText.trim() || isAnswering) return;
-    setCurrentSession(prev => ({
+  // ── Source handlers ───────────────────────────────────────
+  const handleSourceAdded = (newSource) => {
+    setCurrentNotebook(prev => ({
       ...prev,
-      chat_history: [...(prev.chat_history || []), { role: 'user', content: msgText }]
+      sources: [newSource, ...(prev?.sources || [])]
     }));
-    setIsAnswering(true);
+    setNotebooks(prev => prev.map(n => n.id === currentNotebookId ? { ...n, source_count: (n.source_count || 0) + 1 } : n));
+  };
+
+  const handleToggleSource = async (sourceId, isActive) => {
     try {
-      const r = await fetch('/api/chat', {
+      const res = await fetch(`/api/notebooks/${currentNotebookId}/sources/${sourceId}/toggle`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ is_active: isActive })
+      });
+      if (res.ok) {
+        setCurrentNotebook(prev => ({
+          ...prev,
+          sources: prev.sources.map(s => s.id === sourceId ? { ...s, is_active: isActive } : s)
+        }));
+      }
+    } catch {}
+  };
+
+  const handleDeleteSource = async (sourceId) => {
+    try {
+      await fetch(`/api/notebooks/${currentNotebookId}/sources/${sourceId}`, { method: 'DELETE' });
+      setCurrentNotebook(prev => ({
+        ...prev,
+        sources: prev.sources.filter(s => s.id !== sourceId)
+      }));
+      setNotebooks(prev => prev.map(n => n.id === currentNotebookId ? { ...n, source_count: Math.max(0, n.source_count - 1) } : n));
+    } catch {}
+  };
+
+  // ── Chat handlers ─────────────────────────────────────────
+  const handleSendMessage = async (text) => {
+    setIsLoadingChat(true);
+    // Optimistic UI for user message
+    const tempUserMsg = {
+      id: 'temp_' + Date.now(),
+      notebook_id: currentNotebookId,
+      role: 'user',
+      content: text,
+      citations: [],
+      created_at: new Date().toISOString()
+    };
+    setCurrentNotebook(prev => ({
+      ...prev,
+      messages: [...(prev?.messages || []), tempUserMsg]
+    }));
+
+    try {
+      const res = await fetch(`/api/notebooks/${currentNotebookId}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ session_id: currentSessionId, message: msgText })
+        body: JSON.stringify({ message: text })
       });
-      if (!r.ok) {
-        const e = await r.json().catch(() => ({}));
-        throw new Error(e.detail || `Error ${r.status}`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || 'Chat query failed');
       }
-      const data = await r.json();
-      setCurrentSession(prev => ({
+      const assistantMsg = await res.json();
+      setCurrentNotebook(prev => ({
         ...prev,
-        chat_history: [...(prev.chat_history || []), { role: 'assistant', content: data.content }]
+        messages: [...prev.messages.filter(m => m.id !== tempUserMsg.id), tempUserMsg, assistantMsg]
       }));
-      fetchSessions();
     } catch (err) {
-      setCurrentSession(prev => ({
+      alert(`Chat error: ${err.message}`);
+      // Remove temporary message on failure
+      setCurrentNotebook(prev => ({
         ...prev,
-        chat_history: [...(prev.chat_history || []), { role: 'assistant', content: `Something went wrong: ${err.message}` }]
+        messages: prev.messages.filter(m => m.id !== tempUserMsg.id)
       }));
     } finally {
-      setIsAnswering(false);
+      setIsLoadingChat(false);
     }
+  };
+
+  const handleClearChat = async () => {
+    if (!confirm('Clear all chat history for this notebook?')) return;
+    try {
+      await fetch(`/api/notebooks/${currentNotebookId}/chat`, { method: 'DELETE' });
+      setCurrentNotebook(prev => ({ ...prev, messages: [] }));
+    } catch {}
+  };
+
+  // ── Studio note handlers ──────────────────────────────────
+  const handleNoteGenerated = (newNote) => {
+    setCurrentNotebook(prev => ({
+      ...prev,
+      notes: [newNote, ...(prev?.notes || [])]
+    }));
+    setViewingNote(newNote); // Open automatically for user preview
+  };
+
+  const handleDeleteNote = async (noteId) => {
+    try {
+      await fetch(`/api/notebooks/${currentNotebookId}/studio/${noteId}`, { method: 'DELETE' });
+      setCurrentNotebook(prev => ({
+        ...prev,
+        notes: prev.notes.filter(n => n.id !== noteId)
+      }));
+    } catch {}
   };
 
   return (
-    <div style={{ display: 'flex', width: '100vw', height: '100vh', overflow: 'hidden' }}>
-      <Sidebar
-        sessions={sessions}
-        currentSessionId={currentSessionId}
-        onSelectSession={setCurrentSessionId}
-        onNewChat={handleNewChat}
-        onDeleteSession={handleDeleteSession}
-        darkMode={darkMode}
-        onToggleDark={() => setDarkMode(d => !d)}
+    <div className="app-shell">
+      {/* Universal Top Header */}
+      <header className="app-top-header">
+        <div className="header-left-col">
+          {view === 'notebook' ? (
+            <button className="back-to-dashboard-btn" onClick={() => { setView('dashboard'); fetchNotebooks(); }}>
+              <IconArrowLeft size={16} />
+              <span>Notebooks</span>
+            </button>
+          ) : (
+            <div className="logo-brand-wrap">
+              <IconLumen size={26} />
+              <span className="logo-brand-text">Lumen</span>
+            </div>
+          )}
+
+          {view === 'notebook' && currentNotebook && (
+            <div className="notebook-title-editor-wrap">
+              {isEditingTitle ? (
+                <input
+                  type="text"
+                  className="notebook-inline-input"
+                  value={editableTitle}
+                  onChange={(e) => setEditableTitle(e.target.value)}
+                  onBlur={handleSaveTitle}
+                  onKeyDown={(e) => e.key === 'Enter' && handleSaveTitle()}
+                  autoFocus
+                />
+              ) : (
+                <div className="notebook-display-title-row" onClick={() => setIsEditingTitle(true)}>
+                  <h1 className="active-notebook-title">{currentNotebook.title}</h1>
+                  <IconEdit size={14} className="edit-pencil-icon" />
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="header-right-col">
+          <div className="status-badge model-badge">
+            <IconSparkles size={13} />
+            <span>{systemHealth?.llm_engine || 'Meta Llama 3.3 70B'}</span>
+          </div>
+
+          <div className="status-badge db-badge">
+            <IconDatabase size={13} />
+            <span>{systemHealth?.database || 'Database'}</span>
+          </div>
+
+          <button
+            className="theme-toggle-btn"
+            onClick={() => setDarkMode(!darkMode)}
+            title="Toggle theme"
+          >
+            {darkMode ? <IconSun size={17} /> : <IconMoon size={17} />}
+          </button>
+        </div>
+      </header>
+
+      {/* Main Workspace */}
+      {view === 'dashboard' ? (
+        <NotebooksDashboard
+          notebooks={notebooks}
+          onCreateNotebook={handleCreateNotebook}
+          onSelectNotebook={handleSelectNotebook}
+          onDeleteNotebook={handleDeleteNotebook}
+          systemHealth={systemHealth}
+        />
+      ) : (
+        <div className="notebook-workspace-3col">
+          {/* Column 1: Sources */}
+          <SourcesPanel
+            sources={currentNotebook?.sources || []}
+            onOpenAddModal={() => setIsAddSourceOpen(true)}
+            onToggleSource={handleToggleSource}
+            onDeleteSource={handleDeleteSource}
+            onSelectSourceDetail={(sid) => setViewingSourceId(sid)}
+          />
+
+          {/* Column 2: Grounded Chat */}
+          <ChatPanel
+            notebookTitle={currentNotebook?.title || 'Notebook'}
+            messages={currentNotebook?.messages || []}
+            sources={currentNotebook?.sources || []}
+            isLoading={isLoadingChat}
+            onSendMessage={handleSendMessage}
+            onClearChat={handleClearChat}
+            onSelectSourceDetail={(sid) => setViewingSourceId(sid)}
+          />
+
+          {/* Column 3: Studio Guide */}
+          <StudioPanel
+            notebookId={currentNotebookId}
+            notes={currentNotebook?.notes || []}
+            sourcesCount={currentNotebook?.sources?.filter(s => s.is_active)?.length || 0}
+            onNoteGenerated={handleNoteGenerated}
+            onSelectNote={(n) => setViewingNote(n)}
+            onDeleteNote={handleDeleteNote}
+          />
+        </div>
+      )}
+
+      {/* Modals */}
+      <AddSourceModal
+        notebookId={currentNotebookId}
+        isOpen={isAddSourceOpen}
+        onClose={() => setIsAddSourceOpen(false)}
+        onSourceAdded={handleSourceAdded}
       />
-      <ChatArea
-        currentSession={currentSession}
-        searchState={searchState}
-        isSearching={isSearching}
-        isIndexing={isIndexing}
-        indexingLogs={indexingLogs}
-        onGenerateSources={handleGenerateSources}
-        onToggleSource={handleToggleSource}
-        onIndexSources={handleIndexSources}
-        onSendMessage={handleSendMessage}
-        isAnswering={isAnswering}
-        lastPrompt={lastPrompt}
+
+      <SourceViewerModal
+        notebookId={currentNotebookId}
+        sourceId={viewingSourceId}
+        isOpen={Boolean(viewingSourceId)}
+        onClose={() => setViewingSourceId(null)}
+      />
+
+      <NoteViewerModal
+        note={viewingNote}
+        isOpen={Boolean(viewingNote)}
+        onClose={() => setViewingNote(null)}
+        onDelete={handleDeleteNote}
       />
     </div>
   );

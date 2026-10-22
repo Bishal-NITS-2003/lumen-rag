@@ -1,182 +1,200 @@
 import re
+import os
+import json
 import logging
 from typing import List, Dict, Any, Optional
-from datetime import datetime
-
-from langchain_core.documents import Document
+from sqlalchemy.orm import Session
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, BaseMessage
-from langchain_core.output_parsers import StrOutputParser
 
-from app.config import settings
-from app.schemas import MediaSourceItem, ChatSessionInfo
+from .config import settings
+from .models import DocumentChunk, Source
 
 logger = logging.getLogger(__name__)
 
-# --- 1. HuggingFace Embeddings & Text Splitters ---
-
 _EMBEDDINGS: Optional[HuggingFaceEmbeddings] = None
+_CHROMA_CLIENT = None
 
 def get_embeddings() -> HuggingFaceEmbeddings:
     global _EMBEDDINGS
     if _EMBEDDINGS is None:
-        _EMBEDDINGS = HuggingFaceEmbeddings(model_name=settings.HF_EMBEDDING_MODEL)
+        try:
+            _EMBEDDINGS = HuggingFaceEmbeddings(model_name=settings.HF_EMBEDDING_MODEL)
+        except Exception as e:
+            logger.warning(f"Error loading HuggingFaceEmbeddings ({e}), retrying default...")
+            _EMBEDDINGS = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
     return _EMBEDDINGS
 
-TEXT_SPLITTER = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=150)
-
-# --- 2. Conversational RAG Prompt with MessagesPlaceholder ---
-
-RAG_PROMPT = ChatPromptTemplate.from_messages([
-    ("system", (
-        "You are an expert AI research assistant equipped with curated YouTube video transcripts and web articles.\n"
-        "Answer the user's questions thoroughly, clearly, and accurately using ONLY the retrieved context below.\n"
-        "Reference source titles and types (e.g. [YouTube Video: ...] or [Article: ...]) when citing specific claims.\n\n"
-        "=== RETRIEVED CONTEXT ===\n{context}"
-    )),
-    MessagesPlaceholder(variable_name="chat_history"),
-    ("human", "{question}")
-])
-
-# --- 3. Session RAG Engine ---
-
-class SessionRAGEngine:
-    def __init__(self, session_id: str, title: str = "New Research"):
-        self.session_id = session_id
-        self.title = title
-        self.created_at = datetime.now().strftime("%b %d, %H:%M")
-        self.chat_history: List[BaseMessage] = []
-        self.indexed_sources: List[MediaSourceItem] = []
-        self.docs: List[Document] = []
-        self._collection = None
-        self._init_vector_store()
-
-    def _init_vector_store(self):
+def get_chroma_client():
+    global _CHROMA_CLIENT
+    if _CHROMA_CLIENT is None:
         try:
             import chromadb
-            client = chromadb.Client()
-            safe_name = f"sess_{re.sub(r'[^a-zA-Z0-9_-]', '_', self.session_id)}"
-            self._collection = client.create_collection(
-                name=safe_name,
-                metadata={"hnsw:space": "cosine"}
-            )
+            persist_dir = os.path.join(os.path.dirname(__file__), "..", "chroma_db")
+            os.makedirs(persist_dir, exist_ok=True)
+            _CHROMA_CLIENT = chromadb.PersistentClient(path=persist_dir)
         except Exception as e:
-            logger.warning(f"Chroma initialization fallback: {e}")
+            logger.warning(f"Persistent Chroma client failed: {e}. Falling back to ephemeral Client.")
+            import chromadb
+            _CHROMA_CLIENT = chromadb.Client()
+    return _CHROMA_CLIENT
 
-    def index_documents(self, raw_docs: List[Document], sources: List[MediaSourceItem]) -> int:
-        chunks = TEXT_SPLITTER.split_documents(raw_docs)
-        self.docs.extend(chunks)
-        self.indexed_sources = sources
+def get_notebook_collection(notebook_id: str):
+    client = get_chroma_client()
+    safe_name = f"nb_{re.sub(r'[^a-zA-Z0-9_-]', '_', notebook_id)}"
+    return client.get_or_create_collection(
+        name=safe_name,
+        metadata={"hnsw:space": "cosine"}
+    )
 
-        if self._collection and chunks:
-            embeddings = get_embeddings()
-            texts = [c.page_content for c in chunks]
-            metadatas = [c.metadata for c in chunks]
-            ids = [f"{self.session_id}_{i}" for i in range(len(chunks))]
-            vectors = embeddings.embed_documents(texts)
-            self._collection.add(documents=texts, metadatas=metadatas, embeddings=vectors, ids=ids)
+TEXT_SPLITTER = RecursiveCharacterTextSplitter(chunk_size=750, chunk_overlap=100)
 
-        return len(chunks)
+def index_source(db: Session, notebook_id: str, source_id: str, title: str, content: str) -> int:
+    """
+    Chunks document content, saves DocumentChunks in DB, and adds vectors to ChromaDB.
+    """
+    if not content or not content.strip():
+        return 0
 
-    def retrieve(self, query: str, k: int = 4) -> List[Document]:
-        """Retrieves top-k relevant chunks from vector store."""
-        if self._collection and len(self.docs) > 0:
-            try:
-                embeddings = get_embeddings()
-                query_vector = embeddings.embed_query(query)
-                res = self._collection.query(
-                    query_embeddings=[query_vector],
-                    n_results=min(k, len(self.docs))
-                )
-                if res and res.get("documents"):
-                    results = []
-                    docs_texts = res["documents"][0]
-                    metas = res["metadatas"][0] if res.get("metadatas") else [{}] * len(docs_texts)
-                    for text, meta in zip(docs_texts, metas):
-                        results.append(Document(page_content=text, metadata=meta))
-                    return results
-            except Exception as e:
-                logger.warning(f"Vector search error: {e}")
+    # 1. Chunk text
+    raw_chunks = TEXT_SPLITTER.split_text(content)
+    if not raw_chunks:
+        raw_chunks = [content[:750]]
 
-        # In-memory keyword fallback
-        q_tokens = set(query.lower().split())
-        scored = []
-        for d in self.docs:
-            score = sum(1 for t in q_tokens if t in d.page_content.lower())
-            scored.append((score, d))
-        scored.sort(key=lambda x: x[0], reverse=True)
-        return [item[1] for item in scored[:k]]
+    # 2. Delete any old chunks for this source in DB
+    db.query(DocumentChunk).filter(DocumentChunk.source_id == source_id).delete()
+    db.commit()
 
-    async def chat(self, user_question: str) -> Dict[str, Any]:
-        """Runs LangChain Conversational RAG chain using ChatModel, PromptTemplate, and OutputParser."""
-        if not settings.GOOGLE_API_KEY:
-            raise ValueError("GOOGLE_API_KEY is not configured in backend/.env")
+    # 3. Add to DB
+    chunk_objs = []
+    chunk_texts = []
+    chunk_metadatas = []
+    chunk_ids = []
 
-        retrieved_docs = self.retrieve(user_question, k=4)
-        if not retrieved_docs:
-            context_str = "No documents have been indexed yet. Please index research sources first."
-            sources_used = []
-        else:
-            context_str = "\n\n---\n\n".join([
-                f"[{d.metadata.get('type', 'source').upper()}: {d.metadata.get('title', 'Document')}]\n{d.page_content}"
-                for d in retrieved_docs
-            ])
-            sources_used = list({d.metadata.get("title", "") for d in retrieved_docs if d.metadata.get("title")})
-
-        # LangChain Chat Model & Runnable Chain
-        llm = ChatGoogleGenerativeAI(
-            model=settings.DEFAULT_GEMINI_MODEL,
-            google_api_key=settings.GOOGLE_API_KEY,
-            temperature=0.3
+    for i, chunk_text in enumerate(raw_chunks):
+        chunk_obj = DocumentChunk(
+            notebook_id=notebook_id,
+            source_id=source_id,
+            chunk_index=i,
+            content=chunk_text,
+            metadata_json=json.dumps({"source_id": source_id, "title": title, "index": i})
         )
+        chunk_objs.append(chunk_obj)
+        chunk_texts.append(chunk_text)
+        chunk_metadatas.append({"source_id": source_id, "title": title, "index": i})
+        chunk_ids.append(f"{source_id}_{i}")
 
-        rag_chain = RAG_PROMPT | llm | StrOutputParser()
+    db.bulk_save_objects(chunk_objs)
+    db.commit()
 
-        # Execute Chain with chat_history MessagesPlaceholder
-        answer = await rag_chain.ainvoke({
-            "context": context_str,
-            "chat_history": self.chat_history,
-            "question": user_question
+    # 4. Add to Vector Store
+    try:
+        collection = get_notebook_collection(notebook_id)
+        # Delete existing entries for this source
+        try:
+            collection.delete(where={"source_id": source_id})
+        except Exception:
+            pass
+
+        embeddings = get_embeddings()
+        vectors = embeddings.embed_documents(chunk_texts)
+        collection.add(
+            ids=chunk_ids,
+            documents=chunk_texts,
+            metadatas=chunk_metadatas,
+            embeddings=vectors
+        )
+        logger.info(f"Indexed {len(chunk_texts)} chunks for source '{title}' in notebook '{notebook_id}'")
+    except Exception as e:
+        logger.warning(f"Vector store indexing failed ({e}). Database chunks are still preserved.")
+
+    return len(chunk_objs)
+
+
+def delete_source_index(notebook_id: str, source_id: str):
+    """Deletes vectors associated with a source."""
+    try:
+        collection = get_notebook_collection(notebook_id)
+        collection.delete(where={"source_id": source_id})
+    except Exception as e:
+        logger.warning(f"Failed to delete source from vector store: {e}")
+
+
+def retrieve_context_chunks(
+    db: Session,
+    notebook_id: str,
+    query: str,
+    allowed_source_ids: Optional[List[str]] = None,
+    top_k: int = 6
+) -> List[Dict[str, Any]]:
+    """
+    Retrieves top relevant chunks from ChromaDB (with keyword DB fallback).
+    Filters by allowed_source_ids.
+    """
+    results: List[Dict[str, Any]] = []
+
+    # 1. Try Vector Store
+    try:
+        collection = get_notebook_collection(notebook_id)
+        count = collection.count()
+        if count > 0:
+            embeddings = get_embeddings()
+            q_vector = embeddings.embed_query(query)
+            
+            where_filter = None
+            if allowed_source_ids:
+                if len(allowed_source_ids) == 1:
+                    where_filter = {"source_id": allowed_source_ids[0]}
+                else:
+                    where_filter = {"$or": [{"source_id": sid} for sid in allowed_source_ids]}
+
+            query_kwargs = {
+                "query_embeddings": [q_vector],
+                "n_results": min(top_k * 2, count)
+            }
+            if where_filter:
+                query_kwargs["where"] = where_filter
+
+            res = collection.query(**query_kwargs)
+
+            if res and res.get("documents") and len(res["documents"][0]) > 0:
+                docs = res["documents"][0]
+                metas = res["metadatas"][0] if res.get("metadatas") else [{}] * len(docs)
+                for doc_text, meta in zip(docs, metas):
+                    results.append({
+                        "content": doc_text,
+                        "source_id": meta.get("source_id", ""),
+                        "source_title": meta.get("title", "Document"),
+                        "chunk_index": meta.get("index", 0)
+                    })
+                return results[:top_k]
+    except Exception as e:
+        logger.warning(f"Vector search exception: {e}. Falling back to DB search.")
+
+    # 2. Database Keyword Fallback
+    query_builder = db.query(DocumentChunk, Source.title).join(Source, DocumentChunk.source_id == Source.id)
+    query_builder = query_builder.filter(DocumentChunk.notebook_id == notebook_id)
+    if allowed_source_ids:
+        query_builder = query_builder.filter(DocumentChunk.source_id.in_(allowed_source_ids))
+
+    all_chunks = query_builder.all()
+    if not all_chunks:
+        return []
+
+    tokens = set(query.lower().split())
+    scored = []
+    for chunk, source_title in all_chunks:
+        text_lower = chunk.content.lower()
+        score = sum(1 for t in tokens if t in text_lower)
+        scored.append((score, chunk, source_title))
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+    for _, chunk, source_title in scored[:top_k]:
+        results.append({
+            "content": chunk.content,
+            "source_id": chunk.source_id,
+            "source_title": source_title,
+            "chunk_index": chunk.chunk_index
         })
 
-        # Append to conversational history
-        self.chat_history.append(HumanMessage(content=user_question))
-        self.chat_history.append(AIMessage(content=answer))
-
-        return {
-            "answer": answer,
-            "sources": sources_used
-        }
-
-# --- 4. In-Memory Session Manager ---
-
-_SESSIONS: Dict[str, SessionRAGEngine] = {}
-
-def get_or_create_session(session_id: str, title: Optional[str] = None) -> SessionRAGEngine:
-    if session_id not in _SESSIONS:
-        _SESSIONS[session_id] = SessionRAGEngine(session_id, title=title or "New Research")
-    elif title and _SESSIONS[session_id].title == "New Research":
-        _SESSIONS[session_id].title = title
-    return _SESSIONS[session_id]
-
-def list_all_sessions() -> List[ChatSessionInfo]:
-    infos = []
-    for s in reversed(list(_SESSIONS.values())):
-        infos.append(ChatSessionInfo(
-            session_id=s.session_id,
-            title=s.title,
-            created_at=s.created_at,
-            message_count=len(s.chat_history),
-            is_indexed=len(s.docs) > 0,
-            source_count=len(s.indexed_sources)
-        ))
-    return infos
-
-def delete_session(session_id: str) -> bool:
-    if session_id in _SESSIONS:
-        del _SESSIONS[session_id]
-        return True
-    return False
+    return results

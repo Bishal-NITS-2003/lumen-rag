@@ -1,54 +1,127 @@
-from typing import List, Optional, Literal, Dict, Any
+from datetime import datetime
+from typing import List, Optional, Any
 from pydantic import BaseModel, Field
 
+# ─── Scraper & Query Schemas ──────────────────────────────────
 class SearchQueries(BaseModel):
-    queries: List[str] = Field(
-        ...,
-        description="Exactly 5 distinct, high-quality search queries optimized for finding in-depth technical guides, articles, and video explanations"
-    )
+    queries: List[str] = Field(default_factory=list, description="5 search queries")
 
 class MediaSourceItem(BaseModel):
     id: str
     title: str
     link: str
-    type: Literal["youtube", "article"]
+    type: str  # "youtube" | "article"
     thumbnail: Optional[str] = None
     channel: Optional[str] = None
-    snippet: Optional[str] = None
     source: Optional[str] = None
+    snippet: Optional[str] = None
 
-class SearchResponse(BaseModel):
-    session_id: str
-    user_prompt: str
-    queries: List[str]
-    youtube_videos: List[MediaSourceItem]
-    google_articles: List[MediaSourceItem]
+# ─── Notebook Schemas ──────────────────────────────────────────
+class NotebookCreate(BaseModel):
+    title: str = Field(default="Untitled Notebook", max_length=255)
+    description: Optional[str] = Field(default="", max_length=1000)
 
-class IndexSourcesRequest(BaseModel):
-    session_id: str
-    selected_items: List[MediaSourceItem]
+class NotebookUpdate(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
 
-class IndexSourcesResponse(BaseModel):
-    session_id: str
-    indexed_count: int
-    chunks_count: int
-    message: str
-    sources: List[MediaSourceItem]
+class SourceResponse(BaseModel):
+    id: str
+    notebook_id: str
+    title: str
+    source_type: str
+    original_url: Optional[str] = None
+    summary: Optional[str] = None
+    word_count: int = 0
+    is_active: bool = True
+    created_at: datetime
 
-class ChatMessageRequest(BaseModel):
-    session_id: str
-    message: str
+    class Config:
+        from_attributes = True
+
+class SourceDetailResponse(SourceResponse):
+    content: str
+
+class CitationItem(BaseModel):
+    citation_index: int
+    source_id: str
+    source_title: str
+    snippet: str
 
 class ChatMessageResponse(BaseModel):
-    session_id: str
+    id: str
+    notebook_id: str
     role: str
     content: str
-    sources: List[str] = []
+    citations: List[CitationItem] = []
+    created_at: datetime
 
-class ChatSessionInfo(BaseModel):
-    session_id: str
+    class Config:
+        from_attributes = True
+
+class StudioNoteResponse(BaseModel):
+    id: str
+    notebook_id: str
+    note_type: str
     title: str
-    created_at: str
-    message_count: int
-    is_indexed: bool = False
+    content: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+class NotebookResponse(BaseModel):
+    id: str
+    title: str
+    description: Optional[str] = ""
     source_count: int = 0
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+class NotebookDetailResponse(BaseModel):
+    id: str
+    title: str
+    description: Optional[str] = ""
+    sources: List[SourceResponse] = []
+    messages: List[ChatMessageResponse] = []
+    notes: List[StudioNoteResponse] = []
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+# ─── Request Schemas ───────────────────────────────────────────
+class AddUrlSourceRequest(BaseModel):
+    url: str
+    title: Optional[str] = None
+
+class GenerateSourcesRequest(BaseModel):
+    prompt: str
+
+class CandidateSourceItem(BaseModel):
+    title: str
+    url: str
+    type: str  # 'youtube' | 'web'
+    snippet: str
+
+class CandidateSourcesResponse(BaseModel):
+    queries: List[str]
+    candidates: List[CandidateSourceItem]
+
+class AddSelectedSourcesRequest(BaseModel):
+    candidates: List[CandidateSourceItem]
+
+class SourceToggleRequest(BaseModel):
+    is_active: bool
+
+class ChatRequest(BaseModel):
+    message: str
+    source_ids: Optional[List[str]] = None  # None means use all active sources
+
+class GenerateStudioNoteRequest(BaseModel):
+    note_type: str  # 'study_guide', 'briefing_doc', 'faq', 'audio_overview'
+    custom_prompt: Optional[str] = None

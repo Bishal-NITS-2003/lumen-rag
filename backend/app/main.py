@@ -1,21 +1,47 @@
+import os
+import json
 import logging
-from datetime import datetime
-from typing import List, Dict, Any
-from fastapi import FastAPI, HTTPException
+from typing import List, Optional
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, status
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy.orm import Session
 
-from app.config import settings
-from app.schemas import (
-    SearchResponse, IndexSourcesRequest, IndexSourcesResponse,
-    ChatMessageRequest, ChatMessageResponse, ChatSessionInfo
+from .config import settings
+from .database import get_db, init_db
+from .models import Notebook, Source, ChatMessage, StudioNote, DocumentChunk
+from .schemas import (
+    NotebookCreate, NotebookUpdate, NotebookResponse, NotebookDetailResponse,
+    SourceResponse, SourceDetailResponse, SourceToggleRequest,
+    AddUrlSourceRequest, GenerateSourcesRequest, CandidateSourcesResponse, CandidateSourceItem,
+    AddSelectedSourcesRequest, ChatRequest, ChatMessageResponse,
+    GenerateStudioNoteRequest, StudioNoteResponse
 )
-from app.scrapers import generate_search_queries, fetch_media_for_queries, load_source_documents
-from app.rag import get_or_create_session, list_all_sessions, delete_session
+from .aws_service import storage_service, parse_uploaded_document
+from .rag import index_source, delete_source_index, retrieve_context_chunks
+from .llm import (
+    generate_search_queries as plan_queries,
+    summarize_text,
+    generate_grounded_answer,
+    generate_studio_note
+)
+from .scrapers import (
+    fetch_media_for_queries,
+    fetch_youtube_transcript_text,
+    fetch_article_text,
+    extract_youtube_video_id
+)
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="LangChain RAG Assistant")
+# Initialize database schema
+init_db()
+
+app = FastAPI(
+    title=settings.PROJECT_NAME,
+    description="Full-stack AI Research Assistant modeled after Google NotebookLM with Meta Llama 3.3 70B and AWS integration.",
+    version="2.0.0"
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -25,149 +51,457 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.get("/")
-async def root():
-    return {"app": "LangChain RAG Assistant", "status": "online"}
 
+# ─── System & Health ──────────────────────────────────────────
 @app.get("/api/health")
-async def health_check():
+def health_check():
+    active_llm = "Meta Llama 3.3 70B (Groq)" if settings.GROQ_API_KEY else (
+        f"Meta Llama ({settings.HF_LLAMA_MODEL})" if settings.HF_TOKEN else (
+            f"Google Gemini ({settings.DEFAULT_GEMINI_MODEL})" if settings.GOOGLE_API_KEY else "None"
+        )
+    )
     return {
         "status": "healthy",
-        "has_google_key": bool(settings.GOOGLE_API_KEY),
-        "has_serpapi_key": bool(settings.SERPAPI_API_KEY),
-        "model": settings.DEFAULT_GEMINI_MODEL
+        "llm_engine": active_llm,
+        "database": "PostgreSQL" if "postgresql" in settings.DATABASE_URL else "SQLite (Local/RDS Ready)",
+        "aws_s3_connected": storage_service.use_s3,
+        "aws_region": settings.AWS_REGION if storage_service.use_s3 else "local-storage"
     }
 
-# --- Session Management ---
 
-@app.get("/api/sessions", response_model=List[ChatSessionInfo])
-async def get_sessions():
-    """Returns list of previous chat sessions for the sidebar."""
-    return list_all_sessions()
+# ─── Notebook Management ──────────────────────────────────────
+@app.get("/api/notebooks", response_model=List[NotebookResponse])
+def list_notebooks(db: Session = Depends(get_db)):
+    notebooks = db.query(Notebook).order_by(Notebook.updated_at.desc()).all()
+    results = []
+    for nb in notebooks:
+        results.append(NotebookResponse(
+            id=nb.id,
+            title=nb.title,
+            description=nb.description or "",
+            source_count=len(nb.sources),
+            created_at=nb.created_at,
+            updated_at=nb.updated_at
+        ))
+    return results
 
-@app.post("/api/sessions/new", response_model=ChatSessionInfo)
-async def create_new_session(payload: Dict[str, str]):
-    session_id = payload.get("session_id") or f"sess_{int(datetime.now().timestamp())}"
-    title = payload.get("title") or "New Research"
-    sess = get_or_create_session(session_id, title=title)
-    return ChatSessionInfo(
-        session_id=sess.session_id,
-        title=sess.title,
-        created_at=sess.created_at,
-        message_count=0,
-        is_indexed=False,
-        source_count=0
+
+@app.post("/api/notebooks", response_model=NotebookResponse, status_code=status.HTTP_201_CREATED)
+def create_notebook(payload: NotebookCreate, db: Session = Depends(get_db)):
+    nb = Notebook(title=payload.title, description=payload.description or "")
+    db.add(nb)
+    db.commit()
+    db.refresh(nb)
+    return NotebookResponse(
+        id=nb.id,
+        title=nb.title,
+        description=nb.description or "",
+        source_count=0,
+        created_at=nb.created_at,
+        updated_at=nb.updated_at
     )
 
-@app.get("/api/sessions/{session_id}")
-async def get_session_details(session_id: str):
-    sess = get_or_create_session(session_id)
-    history = []
-    for msg in sess.chat_history:
-        history.append({
-            "role": "user" if msg.type == "human" else "assistant",
-            "content": msg.content
-        })
-    return {
-        "session_id": session_id,
-        "title": sess.title,
-        "created_at": sess.created_at,
-        "is_indexed": len(sess.docs) > 0,
-        "indexed_sources": sess.indexed_sources,
-        "chat_history": history
-    }
 
-@app.delete("/api/sessions/{session_id}")
-async def remove_session(session_id: str):
-    success = delete_session(session_id)
-    return {"success": success}
+@app.get("/api/notebooks/{notebook_id}", response_model=NotebookDetailResponse)
+def get_notebook_detail(notebook_id: str, db: Session = Depends(get_db)):
+    nb = db.query(Notebook).filter(Notebook.id == notebook_id).first()
+    if not nb:
+        raise HTTPException(status_code=404, detail="Notebook not found")
 
-# --- Search & Content Acquisition ---
+    messages_data = []
+    for msg in nb.messages:
+        citations = []
+        if msg.citations_json:
+            try:
+                citations = json.loads(msg.citations_json)
+            except Exception:
+                citations = []
+        messages_data.append(ChatMessageResponse(
+            id=msg.id,
+            notebook_id=msg.notebook_id,
+            role=msg.role,
+            content=msg.content,
+            citations=citations,
+            created_at=msg.created_at
+        ))
 
-@app.post("/api/search", response_model=SearchResponse)
-async def search_sources(payload: Dict[str, str]):
-    """
-    1. Generates 5 queries via Gemini structured output.
-    2. Fetches 2 YouTube videos + 2 Google articles per query (10 YouTube + 10 Google).
-    """
-    prompt = payload.get("prompt", "").strip()
-    session_id = payload.get("session_id", "default_session")
+    return NotebookDetailResponse(
+        id=nb.id,
+        title=nb.title,
+        description=nb.description or "",
+        sources=nb.sources,
+        messages=messages_data,
+        notes=nb.notes,
+        created_at=nb.created_at,
+        updated_at=nb.updated_at
+    )
 
+
+@app.put("/api/notebooks/{notebook_id}", response_model=NotebookResponse)
+def update_notebook(notebook_id: str, payload: NotebookUpdate, db: Session = Depends(get_db)):
+    nb = db.query(Notebook).filter(Notebook.id == notebook_id).first()
+    if not nb:
+        raise HTTPException(status_code=404, detail="Notebook not found")
+    if payload.title is not None:
+        nb.title = payload.title
+    if payload.description is not None:
+        nb.description = payload.description
+    db.commit()
+    db.refresh(nb)
+    return NotebookResponse(
+        id=nb.id,
+        title=nb.title,
+        description=nb.description or "",
+        source_count=len(nb.sources),
+        created_at=nb.created_at,
+        updated_at=nb.updated_at
+    )
+
+
+@app.delete("/api/notebooks/{notebook_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_notebook(notebook_id: str, db: Session = Depends(get_db)):
+    nb = db.query(Notebook).filter(Notebook.id == notebook_id).first()
+    if not nb:
+        raise HTTPException(status_code=404, detail="Notebook not found")
+    db.delete(nb)
+    db.commit()
+    return None
+
+
+# ─── Sources Management ───────────────────────────────────────
+@app.post("/api/notebooks/{notebook_id}/sources/upload", response_model=SourceResponse)
+async def upload_file_source(
+    notebook_id: str,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db)
+):
+    """Uploads a PDF, TXT, or MD document into the notebook, saves to AWS S3/local, and indexes."""
+    nb = db.query(Notebook).filter(Notebook.id == notebook_id).first()
+    if not nb:
+        raise HTTPException(status_code=404, detail="Notebook not found")
+
+    file_bytes = await file.read()
+    if not file_bytes:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+
+    # 1. Parse document text
+    text_content, word_count = parse_uploaded_document(file_bytes, file.filename)
+    if not text_content.strip():
+        raise HTTPException(status_code=400, detail="Could not extract readable text from uploaded file.")
+
+    # 2. Save to AWS S3 or local storage
+    file_path, s3_key = storage_service.save_file(file_bytes, file.filename)
+
+    # 3. Generate summary
+    summary = summarize_text(text_content, max_sentences=2)
+
+    # 4. Save Source record in DB
+    source = Source(
+        notebook_id=notebook_id,
+        title=file.filename,
+        source_type="pdf" if file.filename.lower().endswith(".pdf") else "document",
+        file_path=file_path,
+        s3_key=s3_key,
+        summary=summary,
+        content=text_content,
+        word_count=word_count,
+        is_active=True
+    )
+    db.add(source)
+    db.commit()
+    db.refresh(source)
+
+    # 5. Index into Chroma Vector Store and DocumentChunks table
+    index_source(db, notebook_id, source.id, source.title, text_content)
+
+    return source
+
+
+@app.post("/api/notebooks/{notebook_id}/sources/url", response_model=SourceResponse)
+async def add_url_source(
+    notebook_id: str,
+    payload: AddUrlSourceRequest,
+    db: Session = Depends(get_db)
+):
+    """Fetches YouTube transcript or Web article from a URL and adds as a source."""
+    nb = db.query(Notebook).filter(Notebook.id == notebook_id).first()
+    if not nb:
+        raise HTTPException(status_code=404, detail="Notebook not found")
+
+    url = payload.url.strip()
+    is_yt = "youtube.com" in url or "youtu.be" in url
+
+    if is_yt:
+        title = payload.title or "YouTube Video"
+        content = await fetch_youtube_transcript_text(url, title)
+        source_type = "youtube"
+    else:
+        title = payload.title or "Web Article"
+        content = await fetch_article_text(url, title)
+        source_type = "web"
+
+    summary = summarize_text(content, max_sentences=2)
+    words = len(content.split())
+
+    source = Source(
+        notebook_id=notebook_id,
+        title=title,
+        source_type=source_type,
+        original_url=url,
+        summary=summary,
+        content=content,
+        word_count=words,
+        is_active=True
+    )
+    db.add(source)
+    db.commit()
+    db.refresh(source)
+
+    index_source(db, notebook_id, source.id, source.title, content)
+    return source
+
+
+@app.post("/api/notebooks/{notebook_id}/sources/generate-candidates", response_model=CandidateSourcesResponse)
+async def generate_candidate_sources(
+    notebook_id: str,
+    payload: GenerateSourcesRequest,
+    db: Session = Depends(get_db)
+):
+    """Generates search queries from a prompt and searches YouTube and Web for candidate sources."""
+    nb = db.query(Notebook).filter(Notebook.id == notebook_id).first()
+    if not nb:
+        raise HTTPException(status_code=404, detail="Notebook not found")
+
+    prompt = payload.prompt.strip()
     if not prompt:
         raise HTTPException(status_code=400, detail="Prompt cannot be empty.")
 
-    # Initialize session title
-    sess = get_or_create_session(session_id, title=prompt[:32])
+    queries = plan_queries(prompt)
+    media_results = await fetch_media_for_queries(queries)
 
-    try:
-        # Step 1: 5 Search queries
-        queries = await generate_search_queries(prompt)
+    candidates: List[CandidateSourceItem] = []
+    # YouTube candidates
+    for yt in media_results.get("youtube", []):
+        candidates.append(CandidateSourceItem(
+            title=yt.title,
+            url=yt.link,
+            type="youtube",
+            snippet=yt.snippet or f"Channel: {yt.channel}"
+        ))
+    # Article candidates
+    for art in media_results.get("articles", []):
+        candidates.append(CandidateSourceItem(
+            title=art.title,
+            url=art.link,
+            type="web",
+            snippet=art.snippet or f"Source: {art.source}"
+        ))
 
-        # Step 2: 10 YouTube videos & 10 Google articles
-        results = await fetch_media_for_queries(queries)
+    return CandidateSourcesResponse(queries=queries, candidates=candidates)
 
-        return SearchResponse(
-            session_id=session_id,
-            user_prompt=prompt,
-            queries=queries,
-            youtube_videos=results["youtube"],
-            google_articles=results["articles"]
+
+@app.post("/api/notebooks/{notebook_id}/sources/add-candidates", response_model=List[SourceResponse])
+async def add_candidate_sources(
+    notebook_id: str,
+    payload: AddSelectedSourcesRequest,
+    db: Session = Depends(get_db)
+):
+    """Downloads full transcripts/articles for selected candidate sources and indexes them."""
+    nb = db.query(Notebook).filter(Notebook.id == notebook_id).first()
+    if not nb:
+        raise HTTPException(status_code=404, detail="Notebook not found")
+
+    added_sources = []
+    for item in payload.candidates[:6]:  # max 6 at once
+        if item.type == "youtube":
+            content = await fetch_youtube_transcript_text(item.url, item.title)
+        else:
+            content = await fetch_article_text(item.url, item.title)
+
+        summary = summarize_text(content, max_sentences=2)
+        words = len(content.split())
+
+        source = Source(
+            notebook_id=notebook_id,
+            title=item.title,
+            source_type=item.type,
+            original_url=item.url,
+            summary=summary,
+            content=content,
+            word_count=words,
+            is_active=True
         )
-    except Exception as e:
-        logger.error(f"Error in search workflow: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        db.add(source)
+        db.commit()
+        db.refresh(source)
 
-# --- Document Indexing into RAG Vector Store ---
+        index_source(db, notebook_id, source.id, source.title, content)
+        added_sources.append(source)
 
-@app.post("/api/index-sources", response_model=IndexSourcesResponse)
-async def index_sources(req: IndexSourcesRequest):
+    return added_sources
+
+
+@app.patch("/api/notebooks/{notebook_id}/sources/{source_id}/toggle", response_model=SourceResponse)
+def toggle_source(notebook_id: str, source_id: str, payload: SourceToggleRequest, db: Session = Depends(get_db)):
+    source = db.query(Source).filter(Source.id == source_id, Source.notebook_id == notebook_id).first()
+    if not source:
+        raise HTTPException(status_code=404, detail="Source not found")
+    source.is_active = payload.is_active
+    db.commit()
+    db.refresh(source)
+    return source
+
+
+@app.get("/api/notebooks/{notebook_id}/sources/{source_id}", response_model=SourceDetailResponse)
+def get_source_detail(notebook_id: str, source_id: str, db: Session = Depends(get_db)):
+    source = db.query(Source).filter(Source.id == source_id, Source.notebook_id == notebook_id).first()
+    if not source:
+        raise HTTPException(status_code=404, detail="Source not found")
+    return source
+
+
+@app.delete("/api/notebooks/{notebook_id}/sources/{source_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_source(notebook_id: str, source_id: str, db: Session = Depends(get_db)):
+    source = db.query(Source).filter(Source.id == source_id, Source.notebook_id == notebook_id).first()
+    if not source:
+        raise HTTPException(status_code=404, detail="Source not found")
+    delete_source_index(notebook_id, source_id)
+    db.delete(source)
+    db.commit()
+    return None
+
+
+# ─── Chat & RAG (Meta Llama 3.3 70B Grounded) ─────────────────
+@app.post("/api/notebooks/{notebook_id}/chat", response_model=ChatMessageResponse)
+def chat_with_notebook(
+    notebook_id: str,
+    payload: ChatRequest,
+    db: Session = Depends(get_db)
+):
+    nb = db.query(Notebook).filter(Notebook.id == notebook_id).first()
+    if not nb:
+        raise HTTPException(status_code=404, detail="Notebook not found")
+
+    user_query = payload.message.strip()
+    if not user_query:
+        raise HTTPException(status_code=400, detail="Message cannot be empty")
+
+    # Determine which sources are allowed in context
+    if payload.source_ids is not None:
+        allowed_source_ids = payload.source_ids
+    else:
+        allowed_source_ids = [s.id for s in nb.sources if s.is_active]
+
+    # Save User message in DB
+    user_msg = ChatMessage(
+        notebook_id=notebook_id,
+        role="user",
+        content=user_query,
+        citations_json="[]"
+    )
+    db.add(user_msg)
+    db.commit()
+
+    # Retrieve context chunks
+    chunks = retrieve_context_chunks(
+        db,
+        notebook_id=notebook_id,
+        query=user_query,
+        allowed_source_ids=allowed_source_ids,
+        top_k=6
+    )
+
+    # Fetch recent conversation history
+    recent_msgs = db.query(ChatMessage).filter(
+        ChatMessage.notebook_id == notebook_id
+    ).order_by(ChatMessage.created_at.desc()).limit(8).all()
+    history = [{"role": m.role, "content": m.content} for m in reversed(recent_msgs[:-1])]
+
+    # Generate answer with Meta Llama 3.3 70B & citations
+    answer_text, citations = generate_grounded_answer(
+        query=user_query,
+        chunks=chunks,
+        conversation_history=history
+    )
+
+    # Save Assistant message in DB
+    assistant_msg = ChatMessage(
+        notebook_id=notebook_id,
+        role="assistant",
+        content=answer_text,
+        citations_json=json.dumps(citations)
+    )
+    db.add(assistant_msg)
+    db.commit()
+    db.refresh(assistant_msg)
+
+    return ChatMessageResponse(
+        id=assistant_msg.id,
+        notebook_id=assistant_msg.notebook_id,
+        role=assistant_msg.role,
+        content=assistant_msg.content,
+        citations=citations,
+        created_at=assistant_msg.created_at
+    )
+
+
+@app.delete("/api/notebooks/{notebook_id}/chat", status_code=status.HTTP_204_NO_CONTENT)
+def clear_chat_history(notebook_id: str, db: Session = Depends(get_db)):
+    db.query(ChatMessage).filter(ChatMessage.notebook_id == notebook_id).delete()
+    db.commit()
+    return None
+
+
+# ─── Studio / NotebookLM Guide Artifacts ───────────────────────
+@app.post("/api/notebooks/{notebook_id}/studio/generate", response_model=StudioNoteResponse)
+def create_studio_note(
+    notebook_id: str,
+    payload: GenerateStudioNoteRequest,
+    db: Session = Depends(get_db)
+):
     """
-    Loads transcripts and article contents from max 5 user-selected items,
-    splits with RecursiveCharacterTextSplitter, and indexes into Chroma vector store.
+    Generates a NotebookLM studio artifact:
+    - Study Guide
+    - Briefing Doc
+    - FAQ
+    - Audio Overview Podcast Script
     """
-    if not req.selected_items:
-        raise HTTPException(status_code=400, detail="Please select at least 1 source.")
-    if len(req.selected_items) > 5:
-        raise HTTPException(status_code=400, detail="Maximum 5 sources allowed.")
+    nb = db.query(Notebook).filter(Notebook.id == notebook_id).first()
+    if not nb:
+        raise HTTPException(status_code=404, detail="Notebook not found")
 
-    sess = get_or_create_session(req.session_id)
+    active_sources = [s for s in nb.sources if s.is_active]
+    if not active_sources:
+        raise HTTPException(status_code=400, detail="No active sources in notebook to generate from. Please upload or add sources first.")
 
-    try:
-        raw_docs = await load_source_documents(req.selected_items)
-        chunks_count = sess.index_documents(raw_docs, req.selected_items)
+    # Combine active source texts
+    combined_text = "\n\n=== SOURCE ===\n\n".join([
+        f"Title: {s.title}\n{s.content[:3500]}" for s in active_sources
+    ])
 
-        return IndexSourcesResponse(
-            session_id=req.session_id,
-            indexed_count=len(req.selected_items),
-            chunks_count=chunks_count,
-            message=f"Successfully indexed {len(req.selected_items)} sources ({chunks_count} knowledge chunks) into vector store.",
-            sources=req.selected_items
-        )
-    except Exception as e:
-        logger.error(f"Error indexing sources: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+    title, note_content = generate_studio_note(
+        note_type=payload.note_type,
+        sources_text=combined_text,
+        custom_prompt=payload.custom_prompt
+    )
 
-# --- Conversational RAG Chat ---
+    studio_note = StudioNote(
+        notebook_id=notebook_id,
+        note_type=payload.note_type,
+        title=title,
+        content=note_content
+    )
+    db.add(studio_note)
+    db.commit()
+    db.refresh(studio_note)
+    return studio_note
 
-@app.post("/api/chat", response_model=ChatMessageResponse)
-async def chat_with_rag(req: ChatMessageRequest):
-    """
-    Pure LangChain Conversational RAG Q&A:
-    Uses Retriever + MessagesPlaceholder('chat_history') + ChatPromptTemplate + StrOutputParser.
-    """
-    if not req.message.strip():
-        raise HTTPException(status_code=400, detail="Message cannot be empty.")
 
-    sess = get_or_create_session(req.session_id)
-
-    try:
-        res = await sess.chat(req.message.strip())
-        return ChatMessageResponse(
-            session_id=req.session_id,
-            role="assistant",
-            content=res["answer"],
-            sources=res["sources"]
-        )
-    except Exception as e:
-        logger.error(f"Error in RAG chat: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+@app.delete("/api/notebooks/{notebook_id}/studio/{note_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_studio_note(notebook_id: str, note_id: str, db: Session = Depends(get_db)):
+    note = db.query(StudioNote).filter(StudioNote.id == note_id, StudioNote.notebook_id == notebook_id).first()
+    if not note:
+        raise HTTPException(status_code=404, detail="Studio note not found")
+    db.delete(note)
+    db.commit()
+    return None
