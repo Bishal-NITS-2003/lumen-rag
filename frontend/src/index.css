@@ -566,8 +566,43 @@ body {
   border-left: 3px solid var(--primary);
 }
 
-.source-card-item.inactive-context {
-  opacity: 0.6;
+.source-icon-badge-col {
+  padding-top: 2px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.source-actions-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.source-view-btn, .source-delete-btn {
+  background: none;
+  border: none;
+  color: var(--text-3);
+  cursor: pointer;
+  padding: 5px;
+  border-radius: var(--r-sm);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--transition);
+}
+
+.source-view-btn:hover {
+  background: var(--bg-hover);
+  color: var(--primary);
+}
+
+.source-delete-btn:hover {
+  background: var(--red-light);
+  color: var(--red);
 }
 
 .custom-checkbox {
@@ -1316,32 +1351,125 @@ body {
   display: flex;
   background: var(--bg-subtle);
   border-bottom: 1px solid var(--border);
-  padding: 0 16px;
-  gap: 4px;
+  padding: 6px 16px 0;
+  gap: 6px;
 }
 
-.modal-tab {
-  display: flex;
+.modal-tab, .tab-btn {
+  display: inline-flex;
   align-items: center;
-  gap: 6px;
-  background: none;
+  gap: 8px;
+  background: transparent;
   border: none;
-  padding: 10px 14px;
-  font-size: 13px;
+  border-bottom: 2px solid transparent;
+  padding: 10px 16px;
+  font-size: 13.5px;
   font-weight: 500;
   color: var(--text-2);
   cursor: pointer;
-  border-bottom: 2px solid transparent;
   transition: all var(--transition);
+  border-radius: var(--r-sm) var(--r-sm) 0 0;
+  outline: none;
 }
 
-.modal-tab:hover {
+.modal-tab:hover, .tab-btn:hover {
   color: var(--text);
+  background: var(--bg-hover);
 }
 
-.modal-tab.active {
+.modal-tab.active, .tab-btn.active {
   color: var(--primary);
+  font-weight: 600;
   border-bottom-color: var(--primary);
+  background: var(--bg-panel);
+}
+
+.modal-warning-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--amber-light);
+  border-bottom: 1px solid rgba(217, 119, 6, 0.2);
+  color: var(--amber);
+  padding: 10px 20px;
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.spin {
+  animation: spin 0.85s linear infinite;
+  display: inline-block;
+  transform-origin: center center;
+}
+
+.discover-loading-box {
+  padding: 36px 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  background: var(--bg-subtle);
+  border: 1px dashed var(--border-2);
+  border-radius: var(--r-md);
+  margin: 16px 0;
+}
+
+.discover-loading-box.active-extracting {
+  background: linear-gradient(180deg, rgba(79, 70, 229, 0.04) 0%, rgba(79, 70, 229, 0.09) 100%);
+  border: 1px solid rgba(79, 70, 229, 0.35);
+}
+
+.spinner-wrapper {
+  margin-bottom: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.discover-loading-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 6px;
+}
+
+.discover-loading-sub {
+  font-size: 12.5px;
+  color: var(--text-2);
+  max-width: 440px;
+  line-height: 1.45;
+}
+
+.extract-progress-indicator {
+  width: 220px;
+  height: 5px;
+  background: var(--border);
+  border-radius: 999px;
+  margin-top: 18px;
+  overflow: hidden;
+  position: relative;
+}
+
+.extract-progress-bar {
+  position: absolute;
+  left: -50%;
+  width: 50%;
+  height: 100%;
+  background: var(--primary);
+  border-radius: 999px;
+  animation: progressIndeterminate 1.4s ease-in-out infinite;
+}
+
+@keyframes progressIndeterminate {
+  0% { left: -50%; width: 50%; }
+  50% { left: 25%; width: 50%; }
+  100% { left: 100%; width: 50%; }
 }
 
 .modal-body {

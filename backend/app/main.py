@@ -187,6 +187,12 @@ def delete_notebook(notebook_id: str, db: Session = Depends(get_db)):
     nb = db.query(Notebook).filter(Notebook.id == notebook_id).first()
     if not nb:
         raise HTTPException(status_code=404, detail="Notebook not found")
+    for src in nb.sources:
+        try:
+            delete_source_index(notebook_id, src.id)
+            storage_service.delete_file(s3_key=src.s3_key, file_path=src.file_path)
+        except Exception as e:
+            logger.warning(f"Error cleaning source {src.id} during notebook delete: {e}")
     db.delete(nb)
     db.commit()
     return None
@@ -249,6 +255,8 @@ def append_to_notebook_note(notebook_id: str, payload: NoteAppendRequest, db: Se
     return note
 
 
+MAX_SOURCES_PER_NOTEBOOK = 5
+
 # ─── Sources Management ───────────────────────────────────────
 @app.post("/api/notebooks/{notebook_id}/sources/upload", response_model=SourceResponse)
 async def upload_file_source(
@@ -260,6 +268,12 @@ async def upload_file_source(
     nb = db.query(Notebook).filter(Notebook.id == notebook_id).first()
     if not nb:
         raise HTTPException(status_code=404, detail="Notebook not found")
+
+    if len(nb.sources) >= MAX_SOURCES_PER_NOTEBOOK:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Notebook limit reached: Maximum {MAX_SOURCES_PER_NOTEBOOK} sources allowed per notebook. Delete a source to add new ones."
+        )
 
     file_bytes = await file.read()
     if not file_bytes:
@@ -273,8 +287,8 @@ async def upload_file_source(
     # 2. Save to AWS S3 or local storage
     file_path, s3_key = storage_service.save_file(file_bytes, file.filename)
 
-    # 3. Generate summary
-    summary = summarize_text(text_content, max_sentences=2)
+    # 3. Generate summary (quick excerpt)
+    summary = text_content[:220].strip() + "..." if len(text_content) > 220 else text_content.strip()
 
     # 4. Save Source record in DB
     source = Source(
@@ -311,6 +325,12 @@ async def add_url_source(
     if not nb:
         raise HTTPException(status_code=404, detail="Notebook not found")
 
+    if len(nb.sources) >= MAX_SOURCES_PER_NOTEBOOK:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Notebook limit reached: Maximum {MAX_SOURCES_PER_NOTEBOOK} sources allowed per notebook. Delete a source to add new ones."
+        )
+
     url = payload.url.strip()
     is_yt = "youtube.com" in url or "youtu.be" in url
 
@@ -323,7 +343,7 @@ async def add_url_source(
         content, extract_status, extract_err = await fetch_article_text(url, title)
         source_type = "web"
 
-    summary = summarize_text(content, max_sentences=2) if extract_status != "failed" else (extract_err or "Extraction failed.")
+    summary = (content[:220].strip() + "...") if extract_status != "failed" else (extract_err or "Extraction failed.")
     words = len(content.split())
 
     source = Source(
@@ -382,13 +402,21 @@ async def add_candidate_sources(
 ):
     """
     Extracts transcripts and articles for selected candidates IN PARALLEL with timeouts,
-    records extraction_status ('success' | 'failed'), and indexes into RAG.
+    uses instant search snippets for summaries (no slow LLM calls), and enforces max 5 sources per notebook.
     """
     nb = db.query(Notebook).filter(Notebook.id == notebook_id).first()
     if not nb:
         raise HTTPException(status_code=404, detail="Notebook not found")
 
-    selected = payload.candidates[:8]  # Process up to 8 selections
+    existing_count = len(nb.sources)
+    if existing_count >= MAX_SOURCES_PER_NOTEBOOK:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Notebook limit reached: Maximum {MAX_SOURCES_PER_NOTEBOOK} sources allowed per notebook."
+        )
+
+    slots_left = min(5, MAX_SOURCES_PER_NOTEBOOK - existing_count)
+    selected = payload.candidates[:slots_left]
 
     async def extract_one(item: CandidateSourceItem):
         try:
@@ -402,17 +430,18 @@ async def add_candidate_sources(
         except Exception as e:
             return item, f"Title: {item.title}\nURL: {item.url}", item.type, "failed", str(e)
 
-    # Run extraction in parallel
+    # Run extraction in parallel (< 3.5s)
     results = await asyncio.gather(*[extract_one(item) for item in selected])
 
     added_sources: List[Source] = []
     for item, content, src_type, extract_status, extract_err in results:
         words = len(content.split())
+        # Use existing Google search snippet directly for instant 0ms summary
         summary = (
-            summarize_text(content, max_sentences=2)
-            if extract_status != "failed"
-            else (extract_err or "Extraction failed. No content available.")
-        )
+            item.snippet.strip()
+            if (item.snippet and len(item.snippet.strip()) > 10)
+            else (content[:220].strip() + "...")
+        ) if extract_status != "failed" else (extract_err or "Extraction failed. No content available.")
 
         source = Source(
             notebook_id=notebook_id,
@@ -462,7 +491,23 @@ def delete_source(notebook_id: str, source_id: str, db: Session = Depends(get_db
     source = db.query(Source).filter(Source.id == source_id, Source.notebook_id == notebook_id).first()
     if not source:
         raise HTTPException(status_code=404, detail="Source not found")
-    delete_source_index(notebook_id, source_id)
+
+    # 1. Delete Chroma vectors
+    try:
+        delete_source_index(notebook_id, source_id)
+    except Exception as e:
+        logger.warning(f"Error deleting vectors for source {source_id}: {e}")
+
+    # 2. Delete S3 or local file
+    try:
+        storage_service.delete_file(s3_key=source.s3_key, file_path=source.file_path)
+    except Exception as e:
+        logger.warning(f"Error deleting file for source {source_id}: {e}")
+
+    # 3. Explicitly delete DocumentChunks to prevent foreign key issues
+    db.query(DocumentChunk).filter(DocumentChunk.source_id == source_id).delete()
+
+    # 4. Delete Source record
     db.delete(source)
     db.commit()
     return None
@@ -483,63 +528,65 @@ def chat_with_notebook(
     if not user_query:
         raise HTTPException(status_code=400, detail="Message cannot be empty")
 
-    # Determine which sources are allowed in context
-    if payload.source_ids is not None:
-        allowed_source_ids = payload.source_ids
-    else:
-        allowed_source_ids = [s.id for s in nb.sources if s.is_active and s.extraction_status != "failed"]
+    # All sources present in the notebook contribute to context by default
+    allowed_source_ids = [s.id for s in nb.sources if s.extraction_status != "failed"]
 
-    # Save User message in DB
-    user_msg = ChatMessage(
-        notebook_id=notebook_id,
-        role="user",
-        content=user_query,
-        citations_json="[]"
-    )
-    db.add(user_msg)
-    db.commit()
+    try:
+        # Save User message in DB
+        user_msg = ChatMessage(
+            notebook_id=notebook_id,
+            role="user",
+            content=user_query,
+            citations_json="[]"
+        )
+        db.add(user_msg)
+        db.commit()
 
-    # Retrieve context chunks
-    chunks = retrieve_context_chunks(
-        db,
-        notebook_id=notebook_id,
-        query=user_query,
-        allowed_source_ids=allowed_source_ids,
-        top_k=6
-    )
+        # Retrieve context chunks
+        chunks = retrieve_context_chunks(
+            db,
+            notebook_id=notebook_id,
+            query=user_query,
+            allowed_source_ids=allowed_source_ids,
+            top_k=6
+        )
 
-    # Fetch recent conversation history
-    recent_msgs = db.query(ChatMessage).filter(
-        ChatMessage.notebook_id == notebook_id
-    ).order_by(ChatMessage.created_at.desc()).limit(8).all()
-    history = [{"role": m.role, "content": m.content} for m in reversed(recent_msgs[:-1])]
+        # Fetch recent conversation history
+        recent_msgs = db.query(ChatMessage).filter(
+            ChatMessage.notebook_id == notebook_id
+        ).order_by(ChatMessage.created_at.desc()).limit(8).all()
+        history = [{"role": m.role, "content": m.content} for m in reversed(recent_msgs[:-1])]
 
-    # Generate answer with DeepSeek-R1 / Qwen & citations
-    answer_text, citations = generate_grounded_answer(
-        query=user_query,
-        chunks=chunks,
-        conversation_history=history
-    )
+        # Generate answer with DeepSeek-R1 / Qwen / Gemini & citations
+        answer_text, citations = generate_grounded_answer(
+            query=user_query,
+            chunks=chunks,
+            conversation_history=history
+        )
 
-    # Save Assistant message in DB
-    assistant_msg = ChatMessage(
-        notebook_id=notebook_id,
-        role="assistant",
-        content=answer_text,
-        citations_json=json.dumps(citations)
-    )
-    db.add(assistant_msg)
-    db.commit()
-    db.refresh(assistant_msg)
+        # Save Assistant message in DB
+        assistant_msg = ChatMessage(
+            notebook_id=notebook_id,
+            role="assistant",
+            content=answer_text,
+            citations_json=json.dumps(citations)
+        )
+        db.add(assistant_msg)
+        db.commit()
+        db.refresh(assistant_msg)
 
-    return ChatMessageResponse(
-        id=assistant_msg.id,
-        notebook_id=assistant_msg.notebook_id,
-        role=assistant_msg.role,
-        content=assistant_msg.content,
-        citations=citations,
-        created_at=assistant_msg.created_at
-    )
+        return ChatMessageResponse(
+            id=assistant_msg.id,
+            notebook_id=assistant_msg.notebook_id,
+            role=assistant_msg.role,
+            content=assistant_msg.content,
+            citations=citations,
+            created_at=assistant_msg.created_at
+        )
+    except Exception as e:
+        logger.error(f"Chat error in chat_with_notebook: {e}", exc_info=True)
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Chat query failed: {str(e)}")
 
 
 @app.delete("/api/notebooks/{notebook_id}/chat", status_code=status.HTTP_204_NO_CONTENT)

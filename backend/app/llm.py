@@ -12,8 +12,8 @@ def get_llm(temperature: float = 0.2):
     """
     Returns the best available Open Source or fallback LLM:
     1. Groq: DeepSeek-R1 Distill 70B (State-of-the-art Open Reasoning) or Llama 3.3 70B
-    2. Hugging Face: DeepSeek-R1 Distill Qwen or Qwen 2.5 7B Instruct
-    3. Google Gemini (as resilient fallback)
+    2. Hugging Face: DeepSeek-R1 Distill Qwen or Qwen 2.5
+    3. Google Gemini (flash-lite / flash resilient fallback)
     """
     # 1. Groq (DeepSeek-R1 Distill 70B or Llama 3.3 70B Versatile)
     if settings.GROQ_API_KEY:
@@ -31,24 +31,27 @@ def get_llm(temperature: float = 0.2):
     # 2. Hugging Face (DeepSeek-R1 or Qwen 2.5)
     if settings.HF_TOKEN:
         try:
-            from langchain_community.llms import HuggingFaceHub
-            from langchain_community.chat_models.huggingface import ChatHuggingFace
+            from langchain_huggingface import HuggingFaceEndpoint, ChatHuggingFace
             model_id = getattr(settings, "HF_MODEL", "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B")
-            llm = HuggingFaceHub(
+            endpoint = HuggingFaceEndpoint(
                 repo_id=model_id,
                 huggingfacehub_api_token=settings.HF_TOKEN,
-                model_kwargs={"temperature": temperature, "max_new_tokens": 1024}
+                max_new_tokens=1024,
+                temperature=temperature
             )
-            return ChatHuggingFace(llm=llm)
+            return ChatHuggingFace(llm=endpoint)
         except Exception as e:
             logger.warning(f"Hugging Face initialization failed: {e}. Falling back.")
 
-    # 3. Google Gemini fallback
+    # 3. Google Gemini fallback (use flash-lite to avoid 429 quota exhaustion)
     if settings.GOOGLE_API_KEY:
         try:
             from langchain_google_genai import ChatGoogleGenerativeAI
+            target_model = settings.DEFAULT_GEMINI_MODEL
+            if target_model in ["gemini-flash-latest", "gemini-1.5-flash"]:
+                target_model = "gemini-flash-lite-latest"
             return ChatGoogleGenerativeAI(
-                model=settings.DEFAULT_GEMINI_MODEL,
+                model=target_model,
                 google_api_key=settings.GOOGLE_API_KEY,
                 temperature=temperature
             )
@@ -180,8 +183,34 @@ def generate_grounded_answer(
 
     all_messages = [SystemMessage(content=system_instruction)] + history_msgs + [HumanMessage(content=current_prompt)]
 
-    response = llm.invoke(all_messages)
-    raw_answer = response.content.strip()
+    try:
+        response = llm.invoke(all_messages)
+    except Exception as e:
+        logger.warning(f"Primary LLM invocation failed ({e}). Retrying with resilient fallback...")
+        if settings.GOOGLE_API_KEY:
+            from langchain_google_genai import ChatGoogleGenerativeAI
+            fallback_llm = ChatGoogleGenerativeAI(
+                model="gemini-3.5-flash-lite",
+                google_api_key=settings.GOOGLE_API_KEY,
+                temperature=0.2
+            )
+            response = fallback_llm.invoke(all_messages)
+        else:
+            raise e
+
+    # Safely extract text whether response.content is str, list of parts, or dicts
+    if isinstance(response.content, list):
+        text_parts = []
+        for part in response.content:
+            if isinstance(part, dict):
+                text_parts.append(part.get("text", ""))
+            elif hasattr(part, "text"):
+                text_parts.append(str(part.text))
+            else:
+                text_parts.append(str(part))
+        raw_answer = "".join(text_parts).strip()
+    else:
+        raw_answer = str(response.content).strip()
 
     # Clean potential DeepSeek-R1 <think> reasoning tokens
     answer_text = re.sub(r'<think>.*?</think>', '', raw_answer, flags=re.DOTALL).strip()

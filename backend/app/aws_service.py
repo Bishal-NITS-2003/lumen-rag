@@ -59,6 +59,21 @@ class StorageService:
             f.write(file_bytes)
         return local_path, None
 
+    def delete_file(self, s3_key: Optional[str] = None, file_path: Optional[str] = None):
+        """Deletes file from S3 or local disk."""
+        if s3_key and self.use_s3 and self.s3_client:
+            try:
+                self.s3_client.delete_object(Bucket=self.bucket, Key=s3_key)
+                logger.info(f"Deleted S3 object: {s3_key}")
+            except Exception as e:
+                logger.warning(f"Failed to delete S3 object {s3_key}: {e}")
+        elif file_path and os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+                logger.info(f"Deleted local file: {file_path}")
+            except Exception as e:
+                logger.warning(f"Failed to delete local file {file_path}: {e}")
+
 storage_service = StorageService()
 
 def parse_uploaded_document(file_bytes: bytes, filename: str) -> Tuple[str, int]:

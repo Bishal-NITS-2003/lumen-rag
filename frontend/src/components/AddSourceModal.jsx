@@ -1,16 +1,21 @@
 import React, { useState } from 'react';
 import {
   IconX, IconUpload, IconLink, IconSparkles, IconLoader,
-  IconCheck, IconYoutube, IconGlobe, IconFileText, IconSearch
+  IconCheck, IconYoutube, IconGlobe, IconFileText, IconSearch, IconAlertTriangle
 } from './Icons';
 
-export default function AddSourceModal({ notebookId, isOpen, onClose, onSourceAdded }) {
+export default function AddSourceModal({ notebookId, isOpen, onClose, onSourceAdded, currentSourcesCount = 0 }) {
   const [activeTab, setActiveTab] = useState('discover'); // 'discover' | 'upload' | 'link'
-  
+
+  const MAX_SOURCES = 5;
+  const remainingSlots = Math.max(0, MAX_SOURCES - currentSourcesCount);
+  const maxSelectable = Math.min(5, remainingSlots);
+  const isLimitReached = remainingSlots <= 0;
+
   // File Upload State
   const [selectedFile, setSelectedFile] = useState(null);
   const [isUploading, setIsUploading] = useState(false);
-  
+
   // Link State
   const [linkUrl, setLinkUrl] = useState('');
   const [linkTitle, setLinkTitle] = useState('');
@@ -31,6 +36,10 @@ export default function AddSourceModal({ notebookId, isOpen, onClose, onSourceAd
   const handleFileUpload = async (e) => {
     e.preventDefault();
     if (!selectedFile) return;
+    if (isLimitReached) {
+      setErrorMsg(`Notebook limit reached: Maximum ${MAX_SOURCES} sources allowed. Delete an existing source first.`);
+      return;
+    }
     setIsUploading(true);
     setErrorMsg('');
 
@@ -59,6 +68,10 @@ export default function AddSourceModal({ notebookId, isOpen, onClose, onSourceAd
   const handleAddLink = async (e) => {
     e.preventDefault();
     if (!linkUrl.trim()) return;
+    if (isLimitReached) {
+      setErrorMsg(`Notebook limit reached: Maximum ${MAX_SOURCES} sources allowed. Delete an existing source first.`);
+      return;
+    }
     setIsAddingLink(true);
     setErrorMsg('');
 
@@ -114,8 +127,8 @@ export default function AddSourceModal({ notebookId, isOpen, onClose, onSourceAd
     if (exists) {
       setSelectedCandidates(prev => prev.filter(c => c.url !== item.url));
     } else {
-      if (selectedCandidates.length >= 8) {
-        alert("You can select up to 8 sources at a time.");
+      if (selectedCandidates.length >= maxSelectable) {
+        alert(`You can select at most ${maxSelectable} sources (maximum ${MAX_SOURCES} total allowed per notebook).`);
         return;
       }
       setSelectedCandidates(prev => [...prev, item]);
@@ -123,7 +136,7 @@ export default function AddSourceModal({ notebookId, isOpen, onClose, onSourceAd
   };
 
   const handleSelectAll = (items) => {
-    const newItems = items.slice(0, 8);
+    const newItems = items.slice(0, maxSelectable);
     setSelectedCandidates(newItems);
   };
 
@@ -168,7 +181,9 @@ export default function AddSourceModal({ notebookId, isOpen, onClose, onSourceAd
         <div className="modal-header">
           <div className="modal-title-wrap">
             <h3 className="modal-title">Add Sources to Notebook</h3>
-            <p className="modal-sub">Ingest research material into your private grounded context.</p>
+            <p className="modal-sub">
+              Attach research material into your private context ({currentSourcesCount}/{MAX_SOURCES} attached)
+            </p>
           </div>
           <button className="icon-btn" onClick={onClose}>
             <IconX size={18} />
@@ -178,24 +193,34 @@ export default function AddSourceModal({ notebookId, isOpen, onClose, onSourceAd
         {/* Tab Navigation */}
         <div className="modal-tabs">
           <button
+            type="button"
             className={`tab-btn ${activeTab === 'discover' ? 'active' : ''}`}
             onClick={() => { setActiveTab('discover'); setErrorMsg(''); }}
           >
             <IconSparkles size={15} /> Discover from Google
           </button>
           <button
+            type="button"
             className={`tab-btn ${activeTab === 'upload' ? 'active' : ''}`}
             onClick={() => { setActiveTab('upload'); setErrorMsg(''); }}
           >
             <IconUpload size={15} /> Upload PDF / TXT
           </button>
           <button
+            type="button"
             className={`tab-btn ${activeTab === 'link' ? 'active' : ''}`}
             onClick={() => { setActiveTab('link'); setErrorMsg(''); }}
           >
             <IconLink size={15} /> Paste URL
           </button>
         </div>
+
+        {isLimitReached && (
+          <div className="modal-warning-banner">
+            <IconAlertTriangle size={16} />
+            <span>Maximum limit of {MAX_SOURCES} sources reached. Delete an existing source to attach new ones.</span>
+          </div>
+        )}
 
         {errorMsg && (
           <div className="modal-error-banner">
@@ -215,12 +240,12 @@ export default function AddSourceModal({ notebookId, isOpen, onClose, onSourceAd
                   placeholder="Enter any topic or query, e.g. Smartphone under 30000 or Quantum Computing"
                   value={prompt}
                   onChange={(e) => setPrompt(e.target.value)}
-                  disabled={isSearching || isAddingCandidates}
+                  disabled={isSearching || isAddingCandidates || isLimitReached}
                 />
                 <button
                   type="submit"
                   className="btn-primary"
-                  disabled={!prompt.trim() || isSearching || isAddingCandidates}
+                  disabled={!prompt.trim() || isSearching || isAddingCandidates || isLimitReached}
                 >
                   {isSearching ? <IconLoader size={16} className="spin" /> : <IconSearch size={16} />}
                   <span>{isSearching ? 'Searching...' : 'Find Sources'}</span>
@@ -230,23 +255,30 @@ export default function AddSourceModal({ notebookId, isOpen, onClose, onSourceAd
               {/* Active Search Loading State */}
               {isSearching && (
                 <div className="discover-loading-box">
-                  <IconLoader size={28} className="spin text-accent" />
+                  <div className="spinner-wrapper">
+                    <IconLoader size={32} className="spin text-accent" />
+                  </div>
                   <div className="discover-loading-title">Querying Google Search API...</div>
                   <div className="discover-loading-sub">
-                    Extracting top YouTube videos and in-depth web articles simultaneously.
+                    Extracting top YouTube videos and in-depth web articles in real time.
                   </div>
                 </div>
               )}
 
               {/* Active Extraction Loading State */}
               {isAddingCandidates && (
-                <div className="discover-loading-box">
-                  <IconLoader size={28} className="spin text-accent" />
+                <div className="discover-loading-box active-extracting">
+                  <div className="spinner-wrapper">
+                    <IconLoader size={36} className="spin text-accent" />
+                  </div>
                   <div className="discover-loading-title">
                     Ingesting & Extracting {selectedCandidates.length} Selected Sources in Parallel...
                   </div>
                   <div className="discover-loading-sub">
-                    Fetching YouTube video transcripts and cleaning article text with parallel workers.
+                    Parallel workers fetching captions & article contents with 3.5s timeout.
+                  </div>
+                  <div className="extract-progress-indicator">
+                    <div className="extract-progress-bar" />
                   </div>
                 </div>
               )}
@@ -257,18 +289,21 @@ export default function AddSourceModal({ notebookId, isOpen, onClose, onSourceAd
                   <div className="candidates-header-bar">
                     <div className="candidates-filter-pills">
                       <button
+                        type="button"
                         className={`filter-pill ${candidateFilter === 'all' ? 'active' : ''}`}
                         onClick={() => setCandidateFilter('all')}
                       >
                         All ({candidateResults.candidates.length})
                       </button>
                       <button
+                        type="button"
                         className={`filter-pill ${candidateFilter === 'youtube' ? 'active' : ''}`}
                         onClick={() => setCandidateFilter('youtube')}
                       >
                         YouTube ({candidateResults.candidates.filter(c => c.type === 'youtube').length})
                       </button>
                       <button
+                        type="button"
                         className={`filter-pill ${candidateFilter === 'web' ? 'active' : ''}`}
                         onClick={() => setCandidateFilter('web')}
                       >
@@ -277,15 +312,20 @@ export default function AddSourceModal({ notebookId, isOpen, onClose, onSourceAd
                     </div>
 
                     <div className="candidates-quick-toggle">
-                      <button className="text-action-btn" onClick={() => handleSelectAll(filteredCandidates)}>
-                        Select All
+                      <button
+                        type="button"
+                        className="text-action-btn"
+                        onClick={() => handleSelectAll(filteredCandidates)}
+                        disabled={isLimitReached}
+                      >
+                        Select Top {maxSelectable}
                       </button>
                       <span>·</span>
-                      <button className="text-action-btn" onClick={handleDeselectAll}>
+                      <button type="button" className="text-action-btn" onClick={handleDeselectAll}>
                         Clear
                       </button>
                       <span className="selection-counter-badge">
-                        {selectedCandidates.length} selected
+                        {selectedCandidates.length}/{maxSelectable} selected (max 5)
                       </span>
                     </div>
                   </div>
@@ -338,7 +378,7 @@ export default function AddSourceModal({ notebookId, isOpen, onClose, onSourceAd
                       type="button"
                       className="btn-primary"
                       onClick={handleImportCandidates}
-                      disabled={selectedCandidates.length === 0 || isAddingCandidates}
+                      disabled={selectedCandidates.length === 0 || isAddingCandidates || isLimitReached}
                     >
                       Add {selectedCandidates.length} Selected to Sources
                     </button>
@@ -352,14 +392,19 @@ export default function AddSourceModal({ notebookId, isOpen, onClose, onSourceAd
           {activeTab === 'upload' && (
             <form onSubmit={handleFileUpload} className="tab-pane">
               <div
-                className={`file-drop-zone ${selectedFile ? 'has-file' : ''}`}
-                onClick={() => document.getElementById('file-input-field').click()}
+                className={`file-drop-zone ${selectedFile ? 'has-file' : ''} ${isLimitReached ? 'disabled' : ''}`}
+                onClick={() => {
+                  if (!isLimitReached) {
+                    document.getElementById('file-input-field').click();
+                  }
+                }}
               >
                 <input
                   id="file-input-field"
                   type="file"
                   accept=".pdf,.txt,.md"
                   style={{ display: 'none' }}
+                  disabled={isLimitReached}
                   onChange={(e) => {
                     if (e.target.files && e.target.files[0]) {
                       setSelectedFile(e.target.files[0]);
@@ -376,8 +421,12 @@ export default function AddSourceModal({ notebookId, isOpen, onClose, onSourceAd
                   </div>
                 ) : (
                   <>
-                    <div className="drop-title">Click to upload PDF, TXT, or MD</div>
-                    <div className="drop-sub">Saved directly to AWS S3 & indexed for research</div>
+                    <div className="drop-title">
+                      {isLimitReached ? 'Maximum 5 Sources Reached' : 'Click to upload PDF, TXT, or MD'}
+                    </div>
+                    <div className="drop-sub">
+                      {isLimitReached ? 'Delete an existing source first to upload new documents.' : 'Saved directly to AWS S3 & indexed into private vector space'}
+                    </div>
                   </>
                 )}
               </div>
@@ -387,7 +436,7 @@ export default function AddSourceModal({ notebookId, isOpen, onClose, onSourceAd
                 <button
                   type="submit"
                   className="btn-primary"
-                  disabled={!selectedFile || isUploading}
+                  disabled={!selectedFile || isUploading || isLimitReached}
                 >
                   {isUploading ? (
                     <><IconLoader size={16} className="spin" /> Uploading to S3 & Indexing...</>
@@ -410,6 +459,7 @@ export default function AddSourceModal({ notebookId, isOpen, onClose, onSourceAd
                   placeholder="https://www.youtube.com/watch?v=... or https://arxiv.org/..."
                   value={linkUrl}
                   onChange={(e) => setLinkUrl(e.target.value)}
+                  disabled={isLimitReached}
                   required
                 />
               </div>
@@ -422,6 +472,7 @@ export default function AddSourceModal({ notebookId, isOpen, onClose, onSourceAd
                   placeholder="e.g. In-Depth Technical Overview"
                   value={linkTitle}
                   onChange={(e) => setLinkTitle(e.target.value)}
+                  disabled={isLimitReached}
                 />
               </div>
 
@@ -430,7 +481,7 @@ export default function AddSourceModal({ notebookId, isOpen, onClose, onSourceAd
                 <button
                   type="submit"
                   className="btn-primary"
-                  disabled={!linkUrl.trim() || isAddingLink}
+                  disabled={!linkUrl.trim() || isAddingLink || isLimitReached}
                 >
                   {isAddingLink ? (
                     <><IconLoader size={16} className="spin" /> Extracting Content...</>

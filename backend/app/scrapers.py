@@ -125,14 +125,14 @@ async def discover_google_sources(query: str) -> List[CandidateSourceItem]:
 async def fetch_youtube_transcript_text(url: str, title: str) -> Tuple[str, str, Optional[str]]:
     """
     Fetches video transcript using YouTubeTranscriptApi.
-    Supports English, regional, and auto-generated captions.
+    Supports English, regional, and auto-generated captions with non-blocking thread and 3.5s timeout.
     Returns: (content, extraction_status, extraction_error)
     """
     video_id = extract_youtube_video_id(url)
     if not video_id:
         return f"Video Title: {title}\nURL: {url}", "failed", "Invalid YouTube URL format."
 
-    try:
+    def _sync_fetch():
         api = YouTubeTranscriptApi()
         transcript_list = api.list(video_id)
         selected_transcript = None
@@ -156,12 +156,17 @@ async def fetch_youtube_transcript_text(url: str, title: str) -> Tuple[str, str,
                     text_lines.append(txt.strip())
 
             full_text = " ".join(text_lines)
-            if len(full_text.split()) >= 30:
+            if len(full_text.split()) >= 25:
                 header = f"=== YouTube Video Transcript ===\nTitle: {title}\nVideo URL: {url}\nLanguage: {selected_transcript.language}\n\n"
                 return header + full_text, "success", None
+        return None, "failed", "No captions or transcript available for this YouTube video."
 
+    try:
+        res = await asyncio.wait_for(asyncio.to_thread(_sync_fetch), timeout=3.5)
+        if res and res[0]:
+            return res
     except Exception as e:
-        logger.info(f"Could not retrieve live transcript for {video_id}: {e}")
+        logger.info(f"Could not retrieve transcript in time for {video_id}: {e}")
 
     # Fallback message
     fallback_content = (
@@ -178,15 +183,15 @@ async def fetch_article_text(url: str, title: str) -> Tuple[str, str, Optional[s
     Returns: (content, extraction_status, extraction_error)
     """
     try:
-        async with httpx.AsyncClient(headers=HEADERS, timeout=8.0, follow_redirects=True) as client:
+        async with httpx.AsyncClient(headers=HEADERS, timeout=3.5, follow_redirects=True) as client:
             resp = await client.get(url)
             if resp.status_code == 200:
                 cleaned = clean_html_text(resp.text)
                 words = len(cleaned.split())
-                if words >= 60:
+                if words >= 50:
                     header = f"=== Article: {title} ===\nSource URL: {url}\n\n"
                     return header + cleaned, "success", None
-                elif words >= 25:
+                elif words >= 20:
                     header = f"=== Article: {title} ===\nSource URL: {url}\n\n"
                     return header + cleaned, "partial", "Limited text extracted from webpage."
                 else:

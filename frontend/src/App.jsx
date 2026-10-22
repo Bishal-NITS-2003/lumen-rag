@@ -155,13 +155,20 @@ export default function App() {
 
   const handleDeleteSource = async (sourceId) => {
     try {
-      await fetch(`/api/notebooks/${currentNotebookId}/sources/${sourceId}`, { method: 'DELETE' });
-      setCurrentNotebook(prev => ({
-        ...prev,
-        sources: prev.sources.filter(s => s.id !== sourceId)
-      }));
-      setNotebooks(prev => prev.map(n => n.id === currentNotebookId ? { ...n, source_count: Math.max(0, n.source_count - 1) } : n));
-    } catch {}
+      const res = await fetch(`/api/notebooks/${currentNotebookId}/sources/${sourceId}`, { method: 'DELETE' });
+      if (res.ok) {
+        setCurrentNotebook(prev => ({
+          ...prev,
+          sources: (prev?.sources || []).filter(s => s.id !== sourceId)
+        }));
+        setNotebooks(prev => prev.map(n => n.id === currentNotebookId ? { ...n, source_count: Math.max(0, (n.source_count || 1) - 1) } : n));
+      } else {
+        const err = await res.json().catch(() => ({}));
+        alert(`Failed to delete source: ${err.detail || 'Server error'}`);
+      }
+    } catch (err) {
+      alert(`Network error deleting source: ${err.message}`);
+    }
   };
 
   // Open source viewer popup from left panel (eye icon)
@@ -360,6 +367,7 @@ export default function App() {
         isOpen={isAddSourceOpen}
         onClose={() => setIsAddSourceOpen(false)}
         onSourceAdded={handleSourceAdded}
+        currentSourcesCount={currentNotebook?.sources?.length || 0}
       />
 
       <SourceViewerModal

@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     HF_EMBEDDING_MODEL: str = os.getenv("HF_EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2").strip()
     
     GOOGLE_API_KEY: str = os.getenv("GOOGLE_API_KEY", "").strip()
-    DEFAULT_GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-1.5-flash").strip()
+    DEFAULT_GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-flash-lite-latest").strip()
     EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL", "models/text-embedding-004").strip()
     
     # External Data Sources

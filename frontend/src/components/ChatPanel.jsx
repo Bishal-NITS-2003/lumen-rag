@@ -174,7 +174,9 @@ export default function ChatPanel({
           <h2 className="chat-notebook-name">{notebookTitle}</h2>
           <span className="chat-grounding-tag">
             <span className="grounding-dot" />
-            Grounded with {activeSources.length} of {sources.length} sources
+            {sources.length === 0
+              ? 'No sources attached'
+              : `Grounded with all ${sources.length} ${sources.length === 1 ? 'source' : 'sources'}`}
           </span>
         </div>
         {messages.length > 0 && (
