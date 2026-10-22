@@ -91,6 +91,7 @@ class StudioNoteResponse(BaseModel):
 
 class NotebookResponse(BaseModel):
     id: str
+    user_id: Optional[str] = None
     title: str
     description: Optional[str] = ""
     source_count: int = 0
@@ -102,6 +103,7 @@ class NotebookResponse(BaseModel):
 
 class NotebookDetailResponse(BaseModel):
     id: str
+    user_id: Optional[str] = None
     title: str
     description: Optional[str] = ""
     sources: List[SourceResponse] = []

@@ -903,6 +903,375 @@ body {
   white-space: pre-wrap;
 }
 
+.msg-user-content {
+  white-space: pre-wrap;
+  line-height: 1.55;
+  font-size: 14px;
+}
+
+/* ─── Markdown Content Typography & Layout ────────────────────────── */
+.msg-markdown-content {
+  font-size: 14px;
+  line-height: 1.65;
+  color: var(--text);
+  word-break: break-word;
+}
+
+.msg-markdown-content > *:first-child {
+  margin-top: 0 !important;
+}
+
+.msg-markdown-content > *:last-child {
+  margin-bottom: 0 !important;
+}
+
+.msg-markdown-content h1,
+.msg-markdown-content h2,
+.msg-markdown-content h3,
+.msg-markdown-content h4,
+.msg-markdown-content h5,
+.msg-markdown-content h6 {
+  color: var(--text);
+  font-weight: 700;
+  line-height: 1.35;
+  letter-spacing: -0.015em;
+  margin-top: 18px;
+  margin-bottom: 8px;
+}
+
+.msg-markdown-content h1 {
+  font-size: 18px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 6px;
+}
+
+.msg-markdown-content h2 {
+  font-size: 16px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 4px;
+}
+
+.msg-markdown-content h3 {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+  margin-top: 14px;
+  margin-bottom: 6px;
+}
+
+.msg-markdown-content h4 {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.msg-markdown-content p {
+  margin-top: 0;
+  margin-bottom: 10px;
+}
+
+.msg-markdown-content strong,
+.msg-markdown-content b {
+  font-weight: 700 !important;
+  color: var(--text);
+}
+
+.msg-markdown-content em,
+.msg-markdown-content i {
+  font-style: italic;
+  color: var(--text-2);
+}
+
+.msg-markdown-content ul,
+.msg-markdown-content ol {
+  margin: 6px 0 12px 0;
+  padding-left: 22px;
+}
+
+.msg-markdown-content ul {
+  list-style-type: disc;
+}
+
+.msg-markdown-content ol {
+  list-style-type: decimal;
+}
+
+.msg-markdown-content li {
+  margin-bottom: 5px;
+  line-height: 1.55;
+}
+
+.msg-markdown-content li::marker {
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.msg-markdown-content li > p {
+  margin-bottom: 4px;
+}
+
+.msg-markdown-content li > ul,
+.msg-markdown-content li > ol {
+  margin-top: 4px;
+  margin-bottom: 4px;
+  padding-left: 18px;
+}
+
+.msg-markdown-content code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 5px;
+  color: var(--primary);
+}
+
+.msg-markdown-content pre {
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 12px 14px;
+  margin: 10px 0;
+  overflow-x: auto;
+}
+
+.msg-markdown-content pre code {
+  background: none;
+  border: none;
+  padding: 0;
+  color: inherit;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.msg-markdown-content blockquote {
+  border-left: 3px solid var(--primary);
+  padding: 4px 12px;
+  margin: 10px 0;
+  color: var(--text-2);
+  background: var(--bg-subtle);
+  border-radius: 0 var(--r-sm) var(--r-sm) 0;
+}
+
+.msg-markdown-content table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0;
+  font-size: 13px;
+}
+
+.msg-markdown-content th,
+.msg-markdown-content td {
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  text-align: left;
+}
+
+.msg-markdown-content th {
+  background: var(--bg-subtle);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.msg-markdown-content hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 16px 0;
+}
+
+/* ─── Google Authentication Controls ──────────────────────────────── */
+.header-google-signin-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: #ffffff;
+  color: #374151;
+  border: 1px solid #d1d5db;
+  border-radius: var(--r-md);
+  padding: 6px 13px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  transition: all var(--transition);
+}
+
+[data-theme="dark"] .header-google-signin-btn {
+  background: #1e293b;
+  color: #f1f5f9;
+  border-color: #334155;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+.header-google-signin-btn:hover {
+  background: #f9fafb;
+  border-color: #9ca3af;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+  transform: translateY(-1px);
+}
+
+[data-theme="dark"] .header-google-signin-btn:hover {
+  background: #273549;
+  border-color: #475569;
+}
+
+.header-user-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--r-full);
+  padding: 3px 8px 3px 4px;
+  box-shadow: var(--shadow-xs);
+}
+
+.header-user-avatar {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 1px solid var(--border);
+}
+
+.header-user-avatar-initial {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #4f46e5, #7c3aed);
+  color: #ffffff;
+  font-weight: 700;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.header-user-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  max-width: 130px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.header-logout-btn {
+  background: none;
+  border: none;
+  color: var(--text-3);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--transition);
+}
+
+.header-logout-btn:hover {
+  color: var(--red);
+  background: var(--red-light);
+}
+
+.auth-prompt-badge {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--amber);
+  background: var(--amber-light);
+  border: 1px solid rgba(217, 119, 6, 0.25);
+  border-radius: var(--r-full);
+  padding: 2px 8px;
+  margin-left: 8px;
+}
+
+/* ─── Chat Login Gate Banner ──────────────────────────────────────── */
+.chat-login-gate-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  background: linear-gradient(135deg, rgba(79, 70, 229, 0.06), rgba(124, 58, 237, 0.08));
+  border: 1.5px dashed var(--primary);
+  border-radius: var(--r-lg);
+  padding: 16px 20px;
+  animation: fadeIn 0.2s ease-out;
+}
+
+[data-theme="dark"] .chat-login-gate-banner {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.12), rgba(139, 92, 246, 0.1));
+  border-color: rgba(99, 102, 241, 0.5);
+}
+
+.login-gate-info {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex: 1;
+  min-width: 0;
+}
+
+.login-gate-icon-circle {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--primary-light);
+  color: var(--primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.login-gate-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 2px;
+}
+
+.login-gate-desc {
+  font-size: 12px;
+  color: var(--text-2);
+  line-height: 1.4;
+}
+
+.btn-login-gate-google {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: #ffffff;
+  color: #1f2937;
+  border: 1px solid #d1d5db;
+  border-radius: var(--r-md);
+  padding: 10px 18px;
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  flex-shrink: 0;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.06);
+  transition: all var(--transition);
+}
+
+[data-theme="dark"] .btn-login-gate-google {
+  background: #1e293b;
+  color: #ffffff;
+  border-color: #475569;
+}
+
+.btn-login-gate-google:hover {
+  background: #f9fafb;
+  border-color: #9ca3af;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+  transform: translateY(-1px);
+}
+
+[data-theme="dark"] .btn-login-gate-google:hover {
+  background: #2d3b55;
+  border-color: #64748b;
+}
+
 /* ─── Grounded Citation Pills ──────────────────────────────────────── */
 .citation-pill {
   display: inline-flex;

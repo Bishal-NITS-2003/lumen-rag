@@ -11,6 +11,7 @@ class Notebook(Base):
     __tablename__ = "notebooks"
 
     id = Column(String(36), primary_key=True, default=generate_uuid)
+    user_id = Column(String(128), nullable=True, index=True)
     title = Column(String(255), nullable=False, default="Untitled Notebook")
     description = Column(Text, nullable=True, default="")
     created_at = Column(DateTime, default=datetime.utcnow)

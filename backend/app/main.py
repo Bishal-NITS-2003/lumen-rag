@@ -3,7 +3,7 @@ import json
 import logging
 import asyncio
 from typing import List, Optional
-from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, status
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, Header, status
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
@@ -72,12 +72,19 @@ def health_check():
 
 # ─── Notebook Management ──────────────────────────────────────
 @app.get("/api/notebooks", response_model=List[NotebookResponse])
-def list_notebooks(db: Session = Depends(get_db)):
-    notebooks = db.query(Notebook).order_by(Notebook.updated_at.desc()).all()
+def list_notebooks(
+    db: Session = Depends(get_db),
+    x_user_id: Optional[str] = Header(None, alias="X-User-Id")
+):
+    query = db.query(Notebook)
+    if x_user_id:
+        query = query.filter((Notebook.user_id == x_user_id) | (Notebook.user_id == None))
+    notebooks = query.order_by(Notebook.updated_at.desc()).all()
     results = []
     for nb in notebooks:
         results.append(NotebookResponse(
             id=nb.id,
+            user_id=nb.user_id,
             title=nb.title,
             description=nb.description or "",
             source_count=len(nb.sources),
@@ -88,8 +95,12 @@ def list_notebooks(db: Session = Depends(get_db)):
 
 
 @app.post("/api/notebooks", response_model=NotebookResponse, status_code=status.HTTP_201_CREATED)
-def create_notebook(payload: NotebookCreate, db: Session = Depends(get_db)):
-    nb = Notebook(title=payload.title, description=payload.description or "")
+def create_notebook(
+    payload: NotebookCreate,
+    db: Session = Depends(get_db),
+    x_user_id: Optional[str] = Header(None, alias="X-User-Id")
+):
+    nb = Notebook(title=payload.title, description=payload.description or "", user_id=x_user_id)
     db.add(nb)
     db.commit()
     db.refresh(nb)
@@ -101,6 +112,7 @@ def create_notebook(payload: NotebookCreate, db: Session = Depends(get_db)):
 
     return NotebookResponse(
         id=nb.id,
+        user_id=nb.user_id,
         title=nb.title,
         description=nb.description or "",
         source_count=0,
@@ -142,6 +154,7 @@ def get_notebook_detail(notebook_id: str, db: Session = Depends(get_db)):
 
     return NotebookDetailResponse(
         id=nb.id,
+        user_id=nb.user_id,
         title=nb.title,
         description=nb.description or "",
         sources=nb.sources,
@@ -510,8 +523,15 @@ def delete_source(notebook_id: str, source_id: str, db: Session = Depends(get_db
 def chat_with_notebook(
     notebook_id: str,
     payload: ChatRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    x_user_id: Optional[str] = Header(None, alias="X-User-Id")
 ):
+    if not x_user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required: Please sign in with your Google account to chat."
+        )
+
     nb = db.query(Notebook).filter(Notebook.id == notebook_id).first()
     if not nb:
         raise HTTPException(status_code=404, detail="Notebook not found")

@@ -1,14 +1,24 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { marked } from 'marked';
 import {
   IconSend, IconTrash, IconSparkles, IconLoader,
-  IconCopy, IconCheck, IconFileText, IconPlus
+  IconCopy, IconCheck, IconFileText, IconPlus,
+  IconGoogle, IconLock
 } from './Icons';
+
+// Configure marked for clean GFM parsing with breaks
+marked.setOptions({
+  gfm: true,
+  breaks: true,
+});
 
 export default function ChatPanel({
   notebookTitle,
   messages = [],
   sources = [],
   isLoading,
+  user = null,
+  onGoogleSignIn,
   onSendMessage,
   onClearChat,
   onSelectCitation,
@@ -72,6 +82,10 @@ export default function ChatPanel({
 
   const handleSubmit = (e) => {
     e.preventDefault();
+    if (!user) {
+      if (onGoogleSignIn) onGoogleSignIn();
+      return;
+    }
     if (!inputText.trim() || isLoading) return;
     onSendMessage(inputText.trim());
     setInputText('');
@@ -97,49 +111,64 @@ export default function ChatPanel({
     "Generate a structured 5-point executive summary"
   ];
 
-  // Helper to render text with clickable citation pills
-  const renderMessageContent = (content, citations = []) => {
-    if (!citations || citations.length === 0) {
-      return <div className="msg-text-plain">{content}</div>;
+  // Helper to render text with marked Markdown parsing & clickable citation pills
+  const renderMessageContent = (msg) => {
+    const { content, citations = [], role } = msg;
+    if (!content) return null;
+
+    if (role === 'user') {
+      return <div className="msg-user-content">{content}</div>;
     }
 
-    const parts = content.split(/(\[\d+\])/g);
+    // Replace [1], [2], [1, 2], [1, 2, 3] with interactive HTML citation pill spans
+    const processedText = content.replace(/\[(\d+(?:\s*,\s*\d+)*)\]/g, (match, numsStr) => {
+      const indices = numsStr.split(',').map(n => n.trim()).filter(Boolean);
+      return indices.map(num => `<span class="citation-pill" data-citation-index="${num}">${num}</span>`).join(' ');
+    });
+
+    // Parse markdown (headings, bold, lists, code, tables) into HTML
+    const parsedHtml = marked.parse(processedText);
 
     return (
-      <div className="msg-text-parsed">
-        {parts.map((part, i) => {
-          const match = part.match(/\[(\d+)\]/);
-          if (match) {
-            const index = parseInt(match[1], 10);
-            const citation = citations.find(c => c.citation_index === index) || {
-              citation_index: index,
-              source_title: `Source ${index}`,
+      <div
+        className="msg-markdown-content"
+        dangerouslySetInnerHTML={{ __html: parsedHtml }}
+        onClick={(e) => {
+          const pill = e.target.closest('.citation-pill');
+          if (pill) {
+            const idx = parseInt(pill.getAttribute('data-citation-index'), 10);
+            const citation = citations?.find(c => c.citation_index === idx);
+            if (onSelectCitation) {
+              if (citation && citation.source_id) {
+                onSelectCitation(
+                  citation.source_id,
+                  citation.full_snippet || citation.snippet
+                );
+              } else {
+                onSelectCitation(null, `Citation [${idx}]`);
+              }
+            }
+          }
+        }}
+        onMouseOver={(e) => {
+          const pill = e.target.closest('.citation-pill');
+          if (pill) {
+            const idx = parseInt(pill.getAttribute('data-citation-index'), 10);
+            const citation = citations?.find(c => c.citation_index === idx) || {
+              citation_index: idx,
+              source_title: `Source ${idx}`,
               snippet: 'Referenced passage from document context.'
             };
-
-            return (
-              <span
-                key={i}
-                className="citation-pill"
-                onClick={() => {
-                  if (citation.source_id && onSelectCitation) {
-                    onSelectCitation(
-                      citation.source_id,
-                      citation.full_snippet || citation.snippet
-                    );
-                  }
-                }}
-                onMouseEnter={() => setHoveredCitation(citation)}
-                onMouseLeave={() => setHoveredCitation(null)}
-                title={`[${index}] ${citation.source_title} - Click to jump to passage`}
-              >
-                {index}
-              </span>
-            );
+            setHoveredCitation(citation);
           }
-          return <span key={i}>{part}</span>;
-        })}
-      </div>
+        }}
+        onMouseOut={(e) => {
+          const pill = e.target.closest('.citation-pill');
+          if (pill) {
+            setHoveredCitation(null);
+          }
+        }}
+      />
     );
   };
 
@@ -221,7 +250,7 @@ export default function ChatPanel({
                   {msg.role === 'assistant' && (
                     <div className="message-speaker-header">
                       <span className="assistant-badge">
-                        <IconSparkles size={13} /> DeepSeek-R1 Reasoning
+                        <IconSparkles size={13} /> Groq · Qwen Reasoning
                       </span>
                       <div className="message-quick-actions">
                         <button
@@ -248,7 +277,7 @@ export default function ChatPanel({
                   )}
 
                   <div className="message-body">
-                    {renderMessageContent(msg.content, msg.citations)}
+                    {renderMessageContent(msg)}
                   </div>
 
                   {msg.citations && msg.citations.length > 0 && (
@@ -287,7 +316,7 @@ export default function ChatPanel({
                     <span />
                     <span />
                   </div>
-                  <span className="loading-text">Synthesizing grounded answer with DeepSeek-R1...</span>
+                  <span className="loading-text">Synthesizing grounded answer with Groq LPU...</span>
                 </div>
               </div>
             )}
@@ -309,31 +338,57 @@ export default function ChatPanel({
 
       {/* Input area */}
       <div className="chat-input-bar-wrap">
-        <form onSubmit={handleSubmit} className="chat-input-form">
-          <textarea
-            className="chat-textarea"
-            placeholder={
-              activeSources.length === 0
-                ? "Add at least one active source in the left panel to begin..."
-                : "Ask a grounded question about your sources..."
-            }
-            value={inputText}
-            onChange={(e) => setInputText(e.target.value)}
-            onKeyDown={handleKeyDown}
-            rows={1}
-            disabled={isLoading || activeSources.length === 0}
-          />
-          <button
-            type="submit"
-            className="chat-send-btn"
-            disabled={!inputText.trim() || isLoading || activeSources.length === 0}
-          >
-            {isLoading ? <IconLoader size={18} className="spin" /> : <IconSend size={18} />}
-          </button>
-        </form>
-        <div className="chat-input-hint">
-          {activeSources.length} sources active · Highlight any text to Add to Notes · Enter to send
-        </div>
+        {!user ? (
+          <div className="chat-login-gate-banner">
+            <div className="login-gate-info">
+              <div className="login-gate-icon-circle">
+                <IconLock size={18} />
+              </div>
+              <div className="login-gate-text">
+                <div className="login-gate-title">Google Authentication Required to Chat</div>
+                <div className="login-gate-desc">
+                  Sign in with Google so your research chats and notebooks are saved exclusively under your account.
+                </div>
+              </div>
+            </div>
+            <button
+              type="button"
+              className="btn-login-gate-google"
+              onClick={onGoogleSignIn}
+            >
+              <IconGoogle size={17} />
+              <span>Sign in with Google</span>
+            </button>
+          </div>
+        ) : (
+          <>
+            <form onSubmit={handleSubmit} className="chat-input-form">
+              <textarea
+                className="chat-textarea"
+                placeholder={
+                  activeSources.length === 0
+                    ? "Add at least one active source in the left panel to begin..."
+                    : "Ask a grounded question about your sources..."
+                }
+                value={inputText}
+                onChange={(e) => setInputText(e.target.value)}
+                onKeyDown={handleKeyDown}
+                rows={1}
+                disabled={isLoading || activeSources.length === 0}
+              />
+              <button
+                type="submit"
+                className="chat-send-btn"
+                disabled={!inputText.trim() || isLoading || activeSources.length === 0}
+              >
+                {isLoading ? <IconLoader size={18} className="spin" /> : <IconSend size={18} />}
+              </button>
+            </form>
+            <div className="chat-input-hint">
+              {activeSources.length} sources active · Highlight any text to Add to Notes · Enter to send
+            </div>
+          </>
+        )}
       </div>
     </main>
   );

@@ -3,6 +3,8 @@ import { IconLumen, IconPlus, IconTrash, IconBook, IconSparkles, IconLayers, Ico
 
 export default function NotebooksDashboard({
   notebooks = [],
+  user = null,
+  onGoogleSignIn,
   onCreateNotebook,
   onSelectNotebook,
   onDeleteNotebook,
@@ -22,6 +24,14 @@ export default function NotebooksDashboard({
     setShowModal(false);
   };
 
+  const handleOpenCreateModal = () => {
+    if (!user && onGoogleSignIn) {
+      onGoogleSignIn();
+      return;
+    }
+    setShowModal(true);
+  };
+
   return (
     <div className="dashboard-container">
       {/* Top Banner */}
@@ -31,7 +41,7 @@ export default function NotebooksDashboard({
           <div>
             <h1 className="hero-title">Lumen Notebooks</h1>
             <p className="hero-sub">
-              Your personalized AI research workspace powered by Meta Llama 3.3 70B & AWS.
+              Your personalized AI research workspace powered by Groq LPU & AWS RDS.
             </p>
           </div>
         </div>
@@ -39,11 +49,11 @@ export default function NotebooksDashboard({
         <div className="hero-stats-row">
           <div className="hero-stat-pill">
             <span className="stat-label">Model:</span>
-            <span className="stat-value">{systemHealth?.llm_engine || 'Meta Llama 3.3 70B'}</span>
+            <span className="stat-value">{systemHealth?.llm_engine || 'Groq Cloud LPU'}</span>
           </div>
           <div className="hero-stat-pill">
             <span className="stat-label">Database:</span>
-            <span className="stat-value">{systemHealth?.database || 'SQLAlchemy / RDS Ready'}</span>
+            <span className="stat-value">{systemHealth?.database || 'PostgreSQL RDS Ready'}</span>
           </div>
           <div className="hero-stat-pill">
             <span className="stat-label">Storage:</span>
@@ -57,9 +67,12 @@ export default function NotebooksDashboard({
         <div className="dashboard-section-title">
           <h2>All Notebooks</h2>
           <span className="notebooks-count-badge">{notebooks.length}</span>
+          {!user && (
+            <span className="auth-prompt-badge">Sign in with Google to sync</span>
+          )}
         </div>
 
-        <button className="btn-primary" onClick={() => setShowModal(true)}>
+        <button className="btn-primary" onClick={handleOpenCreateModal}>
           <IconPlus size={16} /> New Notebook
         </button>
       </div>
@@ -67,12 +80,12 @@ export default function NotebooksDashboard({
       {/* Notebooks Grid */}
       <div className="notebooks-grid">
         {notebooks.length === 0 ? (
-          <div className="empty-dashboard-card" onClick={() => setShowModal(true)}>
+          <div className="empty-dashboard-card" onClick={handleOpenCreateModal}>
             <div className="empty-icon-wrap">
               <IconPlus size={28} />
             </div>
             <h3>Create your first notebook</h3>
-            <p>Upload research papers, YouTube videos, or articles and synthesize with Llama 3.3 70B.</p>
+            <p>Upload research papers, YouTube videos, or articles and synthesize with Groq LPU.</p>
           </div>
         ) : (
           notebooks.map((nb) => (

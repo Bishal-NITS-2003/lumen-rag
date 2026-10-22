@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import {
   IconLumen, IconArrowLeft, IconSun, IconMoon, IconSparkles,
-  IconEdit, IconDatabase, IconFileText
+  IconEdit, IconDatabase, IconFileText, IconGoogle, IconLogOut, IconUser
 } from './components/Icons';
+import { signInWithGoogle, logOut, subscribeToAuth } from './firebase';
 import NotebooksDashboard from './components/NotebooksDashboard';
 import SourcesPanel from './components/SourcesPanel';
 import ChatPanel from './components/ChatPanel';
@@ -15,6 +16,10 @@ export default function App() {
   const [notebooks, setNotebooks] = useState([]);
   const [currentNotebookId, setCurrentNotebookId] = useState(null);
   const [currentNotebook, setCurrentNotebook] = useState(null);
+
+  // User Auth State
+  const [user, setUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
 
   const [systemHealth, setSystemHealth] = useState(null);
   const [isLoadingChat, setIsLoadingChat] = useState(false);
@@ -38,10 +43,20 @@ export default function App() {
     try { localStorage.setItem('lumen-dark', darkMode); } catch {}
   }, [darkMode]);
 
+  // Subscribe to Firebase Auth changes
   useEffect(() => {
-    fetchNotebooks();
-    fetchHealth();
+    const unsub = subscribeToAuth((currentUser) => {
+      setUser(currentUser);
+      setAuthLoading(false);
+    });
+    return () => unsub();
   }, []);
+
+  // Fetch notebooks when user changes
+  useEffect(() => {
+    fetchNotebooks(user?.uid);
+    fetchHealth();
+  }, [user]);
 
   const fetchHealth = async () => {
     try {
@@ -50,9 +65,11 @@ export default function App() {
     } catch {}
   };
 
-  const fetchNotebooks = async () => {
+  const fetchNotebooks = async (userId = user?.uid) => {
     try {
-      const res = await fetch('/api/notebooks');
+      const headers = {};
+      if (userId) headers['X-User-Id'] = userId;
+      const res = await fetch('/api/notebooks', { headers });
       if (res.ok) {
         const data = await res.json();
         setNotebooks(data);
@@ -62,7 +79,9 @@ export default function App() {
 
   const loadNotebookDetail = async (id) => {
     try {
-      const res = await fetch(`/api/notebooks/${id}`);
+      const headers = {};
+      if (user?.uid) headers['X-User-Id'] = user.uid;
+      const res = await fetch(`/api/notebooks/${id}`, { headers });
       if (res.ok) {
         const data = await res.json();
         setCurrentNotebook(data);
@@ -77,11 +96,44 @@ export default function App() {
     loadNotebookDetail(id);
   };
 
-  const handleCreateNotebook = async (title) => {
+  const handleGoogleSignIn = async () => {
     try {
+      const loggedUser = await signInWithGoogle();
+      if (loggedUser) {
+        setUser(loggedUser);
+        fetchNotebooks(loggedUser.uid);
+      }
+      return loggedUser;
+    } catch (err) {
+      alert(`Google sign in failed: ${err.message}`);
+      return null;
+    }
+  };
+
+  const handleSignOut = async () => {
+    try {
+      await logOut();
+      setUser(null);
+      setCurrentNotebook(null);
+      setCurrentNotebookId(null);
+      setView('dashboard');
+      fetchNotebooks(null);
+    } catch (err) {
+      console.error('Sign out error:', err);
+    }
+  };
+
+  const handleCreateNotebook = async (title) => {
+    if (!user) {
+      const logged = await handleGoogleSignIn();
+      if (!logged) return;
+    }
+    try {
+      const headers = { 'Content-Type': 'application/json' };
+      if (user?.uid) headers['X-User-Id'] = user.uid;
       const res = await fetch('/api/notebooks', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ title })
       });
       if (res.ok) {
@@ -185,6 +237,14 @@ export default function App() {
 
   // ── Chat handlers ─────────────────────────────────────────
   const handleSendMessage = async (text) => {
+    if (!user) {
+      const logged = await handleGoogleSignIn();
+      if (!logged) {
+        alert('Please sign in with your Google account to chat.');
+        return;
+      }
+    }
+
     setIsLoadingChat(true);
     const tempUserMsg = {
       id: 'temp_' + Date.now(),
@@ -202,7 +262,10 @@ export default function App() {
     try {
       const res = await fetch(`/api/notebooks/${currentNotebookId}/chat`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-User-Id': user ? user.uid : ''
+        },
         body: JSON.stringify({ message: text })
       });
       if (!res.ok) {
@@ -228,7 +291,10 @@ export default function App() {
   const handleClearChat = async () => {
     if (!confirm('Clear all chat history for this notebook?')) return;
     try {
-      await fetch(`/api/notebooks/${currentNotebookId}/chat`, { method: 'DELETE' });
+      await fetch(`/api/notebooks/${currentNotebookId}/chat`, {
+        method: 'DELETE',
+        headers: { ...(user?.uid ? { 'X-User-Id': user.uid } : {}) }
+      });
       setCurrentNotebook(prev => ({ ...prev, messages: [] }));
     } catch {}
   };
@@ -239,7 +305,10 @@ export default function App() {
     try {
       const res = await fetch(`/api/notebooks/${currentNotebookId}/note/append`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(user?.uid ? { 'X-User-Id': user.uid } : {})
+        },
         body: JSON.stringify({ text: textToAdd.trim() })
       });
       if (res.ok) {
@@ -296,7 +365,7 @@ export default function App() {
         <div className="header-right-col">
           <div className="status-badge model-badge">
             <IconSparkles size={13} />
-            <span>{systemHealth?.llm_engine || 'DeepSeek-R1 / Qwen Reasoning'}</span>
+            <span>{systemHealth?.llm_engine || 'Groq Cloud'}</span>
           </div>
 
           <div className="status-badge db-badge">
@@ -311,6 +380,30 @@ export default function App() {
           >
             {darkMode ? <IconSun size={17} /> : <IconMoon size={17} />}
           </button>
+
+          {/* Google Authentication Control */}
+          {!user ? (
+            <button className="header-google-signin-btn" onClick={handleGoogleSignIn}>
+              <IconGoogle size={15} />
+              <span>Sign in with Google</span>
+            </button>
+          ) : (
+            <div className="header-user-badge">
+              {user.photoURL ? (
+                <img src={user.photoURL} alt={user.displayName} className="header-user-avatar" />
+              ) : (
+                <div className="header-user-avatar-initial">
+                  {user.displayName ? user.displayName.charAt(0).toUpperCase() : 'G'}
+                </div>
+              )}
+              <span className="header-user-name" title={user.email}>
+                {user.displayName || 'Google User'}
+              </span>
+              <button className="header-logout-btn" onClick={handleSignOut} title="Sign Out">
+                <IconLogOut size={14} />
+              </button>
+            </div>
+          )}
         </div>
       </header>
 
@@ -318,6 +411,8 @@ export default function App() {
       {view === 'dashboard' ? (
         <NotebooksDashboard
           notebooks={notebooks}
+          user={user}
+          onGoogleSignIn={handleGoogleSignIn}
           onCreateNotebook={handleCreateNotebook}
           onSelectNotebook={handleSelectNotebook}
           onDeleteNotebook={handleDeleteNotebook}
@@ -340,6 +435,8 @@ export default function App() {
             messages={currentNotebook?.messages || []}
             sources={currentNotebook?.sources || []}
             isLoading={isLoadingChat}
+            user={user}
+            onGoogleSignIn={handleGoogleSignIn}
             onSendMessage={handleSendMessage}
             onClearChat={handleClearChat}
             onSelectCitation={handleSelectCitation}
