@@ -5,24 +5,49 @@ import logging
 from typing import List, Dict, Any, Optional
 from sqlalchemy.orm import Session
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_huggingface import HuggingFaceEmbeddings
+try:
+    from langchain_huggingface import HuggingFaceEmbeddings
+except ImportError:
+    try:
+        from langchain_community.embeddings import HuggingFaceEmbeddings
+    except ImportError:
+        HuggingFaceEmbeddings = None
 
 from .config import settings
 from .models import DocumentChunk, Source
 
 logger = logging.getLogger(__name__)
 
-_EMBEDDINGS: Optional[HuggingFaceEmbeddings] = None
+_EMBEDDINGS = None
 _CHROMA_CLIENT = None
 
-def get_embeddings() -> HuggingFaceEmbeddings:
+def get_embeddings():
     global _EMBEDDINGS
     if _EMBEDDINGS is None:
-        try:
-            _EMBEDDINGS = HuggingFaceEmbeddings(model_name=settings.HF_EMBEDDING_MODEL)
-        except Exception as e:
-            logger.warning(f"Error loading HuggingFaceEmbeddings ({e}), retrying default...")
-            _EMBEDDINGS = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+        if HuggingFaceEmbeddings is not None:
+            try:
+                _EMBEDDINGS = HuggingFaceEmbeddings(model_name=settings.HF_EMBEDDING_MODEL)
+                return _EMBEDDINGS
+            except Exception as e:
+                logger.warning(f"Error loading HuggingFaceEmbeddings ({e}), retrying default MiniLM...")
+                try:
+                    _EMBEDDINGS = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+                    return _EMBEDDINGS
+                except Exception:
+                    pass
+
+        # Fallback to Google Gemini Embeddings if available
+        if settings.GOOGLE_API_KEY:
+            try:
+                from langchain_google_genai import GoogleGenerativeAIEmbeddings
+                _EMBEDDINGS = GoogleGenerativeAIEmbeddings(
+                    model=settings.EMBEDDING_MODEL,
+                    google_api_key=settings.GOOGLE_API_KEY
+                )
+                return _EMBEDDINGS
+            except Exception as e:
+                logger.warning(f"Gemini embeddings fallback failed: {e}")
+
     return _EMBEDDINGS
 
 def get_chroma_client():
