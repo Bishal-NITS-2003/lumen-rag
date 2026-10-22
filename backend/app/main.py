@@ -60,12 +60,16 @@ def health_check():
         f"DeepSeek-R1 (Groq: {getattr(settings, 'GROQ_MODEL', 'deepseek-r1-distill-llama-70b')})"
         if settings.GROQ_API_KEY
         else (
-            f"DeepSeek-R1 / Qwen ({getattr(settings, 'HF_MODEL', 'deepseek-ai/DeepSeek-R1-Distill-Qwen-7B')})"
-            if settings.HF_TOKEN
+            f"Ollama Local ({getattr(settings, 'OLLAMA_MODEL', 'deepseek-r1')})"
+            if settings.OLLAMA_BASE_URL
             else (
-                f"Google Gemini ({settings.DEFAULT_GEMINI_MODEL})"
-                if settings.GOOGLE_API_KEY
-                else "None"
+                f"OpenRouter ({getattr(settings, 'OPENROUTER_MODEL', 'deepseek/deepseek-r1:free')})"
+                if settings.OPENROUTER_API_KEY
+                else (
+                    f"Hugging Face ({getattr(settings, 'HF_MODEL', 'deepseek-ai/DeepSeek-R1-Distill-Qwen-7B')})"
+                    if settings.HF_TOKEN
+                    else "None"
+                )
             )
         )
     )

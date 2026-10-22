@@ -10,12 +10,13 @@ logger = logging.getLogger(__name__)
 
 def get_llm(temperature: float = 0.2):
     """
-    Returns the best available Open Source or fallback LLM:
-    1. Groq: DeepSeek-R1 Distill 70B (State-of-the-art Open Reasoning) or Llama 3.3 70B
-    2. Hugging Face: DeepSeek-R1 Distill Qwen or Qwen 2.5
-    3. Google Gemini (flash-lite / flash resilient fallback)
+    Returns the configured Open Source LLM engine:
+    1. Groq (DeepSeek-R1 Distill 70B, Llama 3.3 70B, or Qwen 2.5) - Recommended Free High Speed
+    2. Local Ollama (e.g. DeepSeek-R1, Llama 3.2, Qwen running locally on localhost:11434)
+    3. OpenRouter (Free DeepSeek-R1, Qwen & Llama endpoints)
+    4. Hugging Face (Open Source models)
     """
-    # 1. Groq (DeepSeek-R1 Distill 70B or Llama 3.3 70B Versatile)
+    # 1. Groq: Ultra-fast Open Source inference (DeepSeek-R1 / Llama 3.3 / Qwen)
     if settings.GROQ_API_KEY:
         try:
             from langchain_groq import ChatGroq
@@ -26,9 +27,35 @@ def get_llm(temperature: float = 0.2):
                 max_tokens=4096
             )
         except Exception as e:
-            logger.warning(f"Groq initialization failed: {e}. Falling back.")
+            logger.warning(f"Groq initialization failed: {e}. Checking alternative engines...")
 
-    # 2. Hugging Face (DeepSeek-R1 or Qwen 2.5)
+    # 2. Local Ollama / vLLM / LM Studio (Zero API key, runs fully local)
+    if settings.OLLAMA_BASE_URL:
+        try:
+            from langchain_openai import ChatOpenAI
+            return ChatOpenAI(
+                base_url=settings.OLLAMA_BASE_URL,
+                api_key="ollama",
+                model=getattr(settings, "OLLAMA_MODEL", "deepseek-r1"),
+                temperature=temperature
+            )
+        except Exception as e:
+            logger.warning(f"Local Ollama initialization failed: {e}")
+
+    # 3. OpenRouter (Free DeepSeek-R1, Qwen & Llama endpoints)
+    if settings.OPENROUTER_API_KEY:
+        try:
+            from langchain_openai import ChatOpenAI
+            return ChatOpenAI(
+                base_url="https://openrouter.ai/api/v1",
+                api_key=settings.OPENROUTER_API_KEY,
+                model=getattr(settings, "OPENROUTER_MODEL", "deepseek/deepseek-r1:free"),
+                temperature=temperature
+            )
+        except Exception as e:
+            logger.warning(f"OpenRouter initialization failed: {e}")
+
+    # 4. Hugging Face (Open Source models)
     if settings.HF_TOKEN:
         try:
             from langchain_huggingface import HuggingFaceEndpoint, ChatHuggingFace
@@ -41,24 +68,12 @@ def get_llm(temperature: float = 0.2):
             )
             return ChatHuggingFace(llm=endpoint)
         except Exception as e:
-            logger.warning(f"Hugging Face initialization failed: {e}. Falling back.")
+            logger.warning(f"Hugging Face initialization failed: {e}")
 
-    # 3. Google Gemini fallback (use flash-lite to avoid 429 quota exhaustion)
-    if settings.GOOGLE_API_KEY:
-        try:
-            from langchain_google_genai import ChatGoogleGenerativeAI
-            target_model = settings.DEFAULT_GEMINI_MODEL
-            if target_model in ["gemini-flash-latest", "gemini-1.5-flash"]:
-                target_model = "gemini-flash-lite-latest"
-            return ChatGoogleGenerativeAI(
-                model=target_model,
-                google_api_key=settings.GOOGLE_API_KEY,
-                temperature=temperature
-            )
-        except Exception as e:
-            logger.warning(f"Gemini initialization failed: {e}")
-
-    raise ValueError("No LLM API keys configured! Please set GROQ_API_KEY, HF_TOKEN, or GOOGLE_API_KEY in .env.")
+    raise ValueError(
+        "No Open Source LLM configured! Please provide GROQ_API_KEY (for DeepSeek-R1 / Llama 3.3) "
+        "or run a local model via Ollama (http://localhost:11434/v1) in your backend/.env file."
+    )
 
 
 def generate_search_queries(prompt: str) -> List[str]:
@@ -79,7 +94,7 @@ def generate_search_queries(prompt: str) -> List[str]:
     resp = llm.invoke(messages)
     text = resp.content.strip()
 
-    # Clean potential markdown markdown block
+    # Clean potential markdown block
     cleaned = re.sub(r"^```(?:json)?\s*", "", text, flags=re.MULTILINE)
     cleaned = re.sub(r"```$", "", cleaned, flags=re.MULTILINE).strip()
 
@@ -121,7 +136,7 @@ def generate_grounded_answer(
 ) -> Tuple[str, List[Dict[str, Any]]]:
     """
     Generates grounded RAG response with exact bracketed citations [1], [2]
-    matching the supplied source chunks.
+    matching the supplied source chunks using an Open Source LLM (DeepSeek-R1 / LLaMA / Qwen).
     """
     llm = get_llm(temperature=0.2)
 
@@ -183,20 +198,7 @@ def generate_grounded_answer(
 
     all_messages = [SystemMessage(content=system_instruction)] + history_msgs + [HumanMessage(content=current_prompt)]
 
-    try:
-        response = llm.invoke(all_messages)
-    except Exception as e:
-        logger.warning(f"Primary LLM invocation failed ({e}). Retrying with resilient fallback...")
-        if settings.GOOGLE_API_KEY:
-            from langchain_google_genai import ChatGoogleGenerativeAI
-            fallback_llm = ChatGoogleGenerativeAI(
-                model="gemini-3.5-flash-lite",
-                google_api_key=settings.GOOGLE_API_KEY,
-                temperature=0.2
-            )
-            response = fallback_llm.invoke(all_messages)
-        else:
-            raise e
+    response = llm.invoke(all_messages)
 
     # Safely extract text whether response.content is str, list of parts, or dicts
     if isinstance(response.content, list):
@@ -228,11 +230,11 @@ def generate_grounded_answer(
 
 def generate_studio_note(note_type: str, sources_text: str, custom_prompt: str = None) -> Tuple[str, str]:
     """
-    Generates NotebookLM Studio artifacts:
-    - Study Guide (Key concepts, review questions, glossary)
-    - Briefing Doc (Executive summary, key insights, strategic takeaways)
-    - FAQ (Common Q&A based strictly on sources)
-    - Audio Overview Script (Engaging two-host podcast script discussing the material)
+    Generates research artifacts using the Open Source LLM:
+    - Study Guide
+    - Briefing Doc
+    - FAQ
+    - Audio Overview Script
     """
     llm = get_llm(temperature=0.3)
 

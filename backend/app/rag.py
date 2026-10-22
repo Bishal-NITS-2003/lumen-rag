@@ -29,25 +29,12 @@ def get_embeddings():
                 _EMBEDDINGS = HuggingFaceEmbeddings(model_name=settings.HF_EMBEDDING_MODEL)
                 return _EMBEDDINGS
             except Exception as e:
-                logger.warning(f"Error loading HuggingFaceEmbeddings ({e}), retrying default MiniLM...")
+                logger.warning(f"Error loading {settings.HF_EMBEDDING_MODEL} ({e}), retrying default MiniLM...")
                 try:
                     _EMBEDDINGS = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
                     return _EMBEDDINGS
-                except Exception:
-                    pass
-
-        # Fallback to Google Gemini Embeddings if available
-        if settings.GOOGLE_API_KEY:
-            try:
-                from langchain_google_genai import GoogleGenerativeAIEmbeddings
-                _EMBEDDINGS = GoogleGenerativeAIEmbeddings(
-                    model=settings.EMBEDDING_MODEL,
-                    google_api_key=settings.GOOGLE_API_KEY
-                )
-                return _EMBEDDINGS
-            except Exception as e:
-                logger.warning(f"Gemini embeddings fallback failed: {e}")
-
+                except Exception as inner_e:
+                    logger.error(f"Failed to load sentence-transformers MiniLM: {inner_e}")
     return _EMBEDDINGS
 
 def get_chroma_client():
