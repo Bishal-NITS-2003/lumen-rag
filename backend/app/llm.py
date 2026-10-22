@@ -10,69 +10,26 @@ logger = logging.getLogger(__name__)
 
 def get_llm(temperature: float = 0.2):
     """
-    Returns the configured Open Source LLM engine:
-    1. Groq (DeepSeek-R1 Distill 70B, Llama 3.3 70B, or Qwen 2.5) - Recommended Free High Speed
-    2. Local Ollama (e.g. DeepSeek-R1, Llama 3.2, Qwen running locally on localhost:11434)
-    3. OpenRouter (Free DeepSeek-R1, Qwen & Llama endpoints)
-    4. Hugging Face (Open Source models)
+    Returns the cloud-hosted Open Source LLM engine via Groq:
+    DeepSeek-R1 Distill 70B (or Llama 3.3 70B / Qwen 2.5).
+    Runs on Groq LPUs with ~300 tok/sec, imposing 0 CPU/GPU load on the AWS server.
     """
-    # 1. Groq: Ultra-fast Open Source inference (DeepSeek-R1 / Llama 3.3 / Qwen)
     if settings.GROQ_API_KEY:
         try:
             from langchain_groq import ChatGroq
             return ChatGroq(
                 groq_api_key=settings.GROQ_API_KEY,
-                model_name=getattr(settings, "GROQ_MODEL", "deepseek-r1-distill-llama-70b"),
+                model_name=getattr(settings, "GROQ_MODEL", "qwen/qwen3.8-27b"),
                 temperature=temperature,
                 max_tokens=4096
             )
         except Exception as e:
-            logger.warning(f"Groq initialization failed: {e}. Checking alternative engines...")
-
-    # 2. Local Ollama / vLLM / LM Studio (Zero API key, runs fully local)
-    if settings.OLLAMA_BASE_URL:
-        try:
-            from langchain_openai import ChatOpenAI
-            return ChatOpenAI(
-                base_url=settings.OLLAMA_BASE_URL,
-                api_key="ollama",
-                model=getattr(settings, "OLLAMA_MODEL", "deepseek-r1"),
-                temperature=temperature
-            )
-        except Exception as e:
-            logger.warning(f"Local Ollama initialization failed: {e}")
-
-    # 3. OpenRouter (Free DeepSeek-R1, Qwen & Llama endpoints)
-    if settings.OPENROUTER_API_KEY:
-        try:
-            from langchain_openai import ChatOpenAI
-            return ChatOpenAI(
-                base_url="https://openrouter.ai/api/v1",
-                api_key=settings.OPENROUTER_API_KEY,
-                model=getattr(settings, "OPENROUTER_MODEL", "deepseek/deepseek-r1:free"),
-                temperature=temperature
-            )
-        except Exception as e:
-            logger.warning(f"OpenRouter initialization failed: {e}")
-
-    # 4. Hugging Face (Open Source models)
-    if settings.HF_TOKEN:
-        try:
-            from langchain_huggingface import HuggingFaceEndpoint, ChatHuggingFace
-            model_id = getattr(settings, "HF_MODEL", "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B")
-            endpoint = HuggingFaceEndpoint(
-                repo_id=model_id,
-                huggingfacehub_api_token=settings.HF_TOKEN,
-                max_new_tokens=1024,
-                temperature=temperature
-            )
-            return ChatHuggingFace(llm=endpoint)
-        except Exception as e:
-            logger.warning(f"Hugging Face initialization failed: {e}")
+            logger.error(f"Groq initialization failed: {e}")
+            raise e
 
     raise ValueError(
-        "No Open Source LLM configured! Please provide GROQ_API_KEY (for DeepSeek-R1 / Llama 3.3) "
-        "or run a local model via Ollama (http://localhost:11434/v1) in your backend/.env file."
+        "Groq API key not configured! Please add GROQ_API_KEY=gsk_... to your backend/.env file. "
+        "You can generate a free key in seconds at https://console.groq.com."
     )
 
 

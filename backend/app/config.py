@@ -11,24 +11,12 @@ class Settings(BaseSettings):
     # Database (PostgreSQL RDS / SQLite)
     DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./notebooks.db").strip()
     
-    # Open Source LLM Engines (DeepSeek-R1, Llama 3.3, Qwen 2.5)
-    # Option 1: Groq (Recommended - Ultra-fast & Free Tier)
+    # Cloud Open Source LLM Engine: Groq (Qwen 3.8 27B / LLaMA)
+    # Hosted on Groq LPUs with ~300 tok/s - 0 CPU/GPU load on AWS EC2
     GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "").strip()
-    GROQ_MODEL: str = os.getenv("GROQ_MODEL", "deepseek-r1-distill-llama-70b").strip()
-    
-    # Option 2: Local Ollama / vLLM / LM Studio (Zero API Keys needed)
-    OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1").strip()
-    OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "deepseek-r1").strip()
-    
-    # Option 3: Hugging Face Serverless / Inference Providers
-    HF_TOKEN: str = (os.getenv("HF_TOKEN") or os.getenv("HUGGINGFACEHUB_API_TOKEN") or "").strip()
-    HF_MODEL: str = os.getenv("HF_MODEL", "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B").strip()
-    
-    # Option 4: OpenRouter (Free DeepSeek-R1, Qwen & Llama endpoints)
-    OPENROUTER_API_KEY: str = os.getenv("OPENROUTER_API_KEY", "").strip()
-    OPENROUTER_MODEL: str = os.getenv("OPENROUTER_MODEL", "deepseek/deepseek-r1:free").strip()
+    GROQ_MODEL: str = os.getenv("GROQ_MODEL", "qwen/qwen3.8-27b").strip()
 
-    # Local Open Source Vector Embeddings (MiniLM - runs locally on CPU with 0 API calls)
+    # Local Vector Embeddings (MiniLM - lightweight CPU sentence embeddings with 0 external API calls)
     HF_EMBEDDING_MODEL: str = os.getenv("HF_EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2").strip()
     
     # Search API (SerpAPI for Google discovery of articles and YouTube metadata)
