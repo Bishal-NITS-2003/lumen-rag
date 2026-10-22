@@ -101,3 +101,13 @@ def init_db():
     os.makedirs(settings.STORAGE_DIR, exist_ok=True)
     from . import models  # noqa: F401
     Base.metadata.create_all(bind=engine)
+
+    # Safe migration: add extraction_status and extraction_error columns if not present
+    try:
+        from sqlalchemy import text
+        with engine.connect() as conn:
+            conn.execute(text("ALTER TABLE sources ADD COLUMN IF NOT EXISTS extraction_status VARCHAR(50) DEFAULT 'success'"))
+            conn.execute(text("ALTER TABLE sources ADD COLUMN IF NOT EXISTS extraction_error TEXT"))
+            conn.commit()
+    except Exception as e:
+        logger.debug(f"Column migration check note: {e}")

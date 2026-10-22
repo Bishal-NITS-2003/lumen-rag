@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
 import {
   IconX, IconUpload, IconLink, IconSparkles, IconLoader,
-  IconCheck, IconYoutube, IconGlobe, IconFileText
+  IconCheck, IconYoutube, IconGlobe, IconFileText, IconSearch
 } from './Icons';
 
 export default function AddSourceModal({ notebookId, isOpen, onClose, onSourceAdded }) {
-  const [activeTab, setActiveTab] = useState('upload'); // 'upload' | 'link' | 'generate'
+  const [activeTab, setActiveTab] = useState('discover'); // 'discover' | 'upload' | 'link'
   
   // File Upload State
   const [selectedFile, setSelectedFile] = useState(null);
@@ -16,12 +16,13 @@ export default function AddSourceModal({ notebookId, isOpen, onClose, onSourceAd
   const [linkTitle, setLinkTitle] = useState('');
   const [isAddingLink, setIsAddingLink] = useState(false);
 
-  // Generate / Discover State
+  // Discover / Google Search State
   const [prompt, setPrompt] = useState('');
   const [isSearching, setIsSearching] = useState(false);
   const [candidateResults, setCandidateResults] = useState(null);
   const [selectedCandidates, setSelectedCandidates] = useState([]);
   const [isAddingCandidates, setIsAddingCandidates] = useState(false);
+  const [candidateFilter, setCandidateFilter] = useState('all'); // 'all' | 'youtube' | 'web'
 
   const [errorMsg, setErrorMsg] = useState('');
 
@@ -97,7 +98,7 @@ export default function AddSourceModal({ notebookId, isOpen, onClose, onSourceAd
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(err.detail || 'Search generation failed');
+        throw new Error(err.detail || 'Google Search failed');
       }
       const data = await res.json();
       setCandidateResults(data);
@@ -113,12 +114,21 @@ export default function AddSourceModal({ notebookId, isOpen, onClose, onSourceAd
     if (exists) {
       setSelectedCandidates(prev => prev.filter(c => c.url !== item.url));
     } else {
-      if (selectedCandidates.length >= 5) {
-        alert("You can select up to 5 sources at a time.");
+      if (selectedCandidates.length >= 8) {
+        alert("You can select up to 8 sources at a time.");
         return;
       }
       setSelectedCandidates(prev => [...prev, item]);
     }
+  };
+
+  const handleSelectAll = (items) => {
+    const newItems = items.slice(0, 8);
+    setSelectedCandidates(newItems);
+  };
+
+  const handleDeselectAll = () => {
+    setSelectedCandidates([]);
   };
 
   const handleImportCandidates = async () => {
@@ -134,7 +144,7 @@ export default function AddSourceModal({ notebookId, isOpen, onClose, onSourceAd
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(err.detail || 'Failed to import candidates');
+        throw new Error(err.detail || 'Failed to import candidate sources');
       }
       const addedList = await res.json();
       addedList.forEach(s => onSourceAdded(s));
@@ -146,73 +156,230 @@ export default function AddSourceModal({ notebookId, isOpen, onClose, onSourceAd
     }
   };
 
+  const filteredCandidates = candidateResults?.candidates?.filter(c => {
+    if (candidateFilter === 'youtube') return c.type === 'youtube';
+    if (candidateFilter === 'web') return c.type === 'web' || c.type === 'article';
+    return true;
+  }) || [];
+
   return (
-    <div className="modal-backdrop">
-      <div className="modal-content">
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal-content add-source-modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <div className="modal-title-wrap">
             <h3 className="modal-title">Add Sources to Notebook</h3>
-            <p className="modal-sub">Sources are indexed and grounded into your Llama 3.3 70B RAG context.</p>
+            <p className="modal-sub">Ingest research material into your private grounded context.</p>
           </div>
           <button className="icon-btn" onClick={onClose}>
             <IconX size={18} />
           </button>
         </div>
 
-        {errorMsg && (
-          <div className="modal-error">
-            {errorMsg}
-          </div>
-        )}
-
+        {/* Tab Navigation */}
         <div className="modal-tabs">
           <button
-            className={`modal-tab ${activeTab === 'upload' ? 'active' : ''}`}
-            onClick={() => setActiveTab('upload')}
+            className={`tab-btn ${activeTab === 'discover' ? 'active' : ''}`}
+            onClick={() => { setActiveTab('discover'); setErrorMsg(''); }}
           >
-            <IconUpload size={16} /> Upload Files
+            <IconSparkles size={15} /> Discover from Google
           </button>
           <button
-            className={`modal-tab ${activeTab === 'link' ? 'active' : ''}`}
-            onClick={() => setActiveTab('link')}
+            className={`tab-btn ${activeTab === 'upload' ? 'active' : ''}`}
+            onClick={() => { setActiveTab('upload'); setErrorMsg(''); }}
           >
-            <IconLink size={16} /> Link / YouTube
+            <IconUpload size={15} /> Upload PDF / TXT
           </button>
           <button
-            className={`modal-tab ${activeTab === 'generate' ? 'active' : ''}`}
-            onClick={() => setActiveTab('generate')}
+            className={`tab-btn ${activeTab === 'link' ? 'active' : ''}`}
+            onClick={() => { setActiveTab('link'); setErrorMsg(''); }}
           >
-            <IconSparkles size={16} /> Discover from Topic
+            <IconLink size={15} /> Paste URL
           </button>
         </div>
 
+        {errorMsg && (
+          <div className="modal-error-banner">
+            <span>{errorMsg}</span>
+            <button className="banner-close" onClick={() => setErrorMsg('')}>✕</button>
+          </div>
+        )}
+
         <div className="modal-body">
-          {/* TAB 1: File Upload */}
+          {/* TAB 1: Discover from Google (Articles & YouTube) */}
+          {activeTab === 'discover' && (
+            <div className="tab-pane">
+              <form onSubmit={handleDiscoverPrompt} className="search-box-row">
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="Enter any topic or query, e.g. Smartphone under 30000 or Quantum Computing"
+                  value={prompt}
+                  onChange={(e) => setPrompt(e.target.value)}
+                  disabled={isSearching || isAddingCandidates}
+                />
+                <button
+                  type="submit"
+                  className="btn-primary"
+                  disabled={!prompt.trim() || isSearching || isAddingCandidates}
+                >
+                  {isSearching ? <IconLoader size={16} className="spin" /> : <IconSearch size={16} />}
+                  <span>{isSearching ? 'Searching...' : 'Find Sources'}</span>
+                </button>
+              </form>
+
+              {/* Active Search Loading State */}
+              {isSearching && (
+                <div className="discover-loading-box">
+                  <IconLoader size={28} className="spin text-accent" />
+                  <div className="discover-loading-title">Querying Google Search API...</div>
+                  <div className="discover-loading-sub">
+                    Extracting top YouTube videos and in-depth web articles simultaneously.
+                  </div>
+                </div>
+              )}
+
+              {/* Active Extraction Loading State */}
+              {isAddingCandidates && (
+                <div className="discover-loading-box">
+                  <IconLoader size={28} className="spin text-accent" />
+                  <div className="discover-loading-title">
+                    Ingesting & Extracting {selectedCandidates.length} Selected Sources in Parallel...
+                  </div>
+                  <div className="discover-loading-sub">
+                    Fetching YouTube video transcripts and cleaning article text with parallel workers.
+                  </div>
+                </div>
+              )}
+
+              {/* Results List */}
+              {candidateResults && !isSearching && !isAddingCandidates && (
+                <div className="candidates-list-wrap">
+                  <div className="candidates-header-bar">
+                    <div className="candidates-filter-pills">
+                      <button
+                        className={`filter-pill ${candidateFilter === 'all' ? 'active' : ''}`}
+                        onClick={() => setCandidateFilter('all')}
+                      >
+                        All ({candidateResults.candidates.length})
+                      </button>
+                      <button
+                        className={`filter-pill ${candidateFilter === 'youtube' ? 'active' : ''}`}
+                        onClick={() => setCandidateFilter('youtube')}
+                      >
+                        YouTube ({candidateResults.candidates.filter(c => c.type === 'youtube').length})
+                      </button>
+                      <button
+                        className={`filter-pill ${candidateFilter === 'web' ? 'active' : ''}`}
+                        onClick={() => setCandidateFilter('web')}
+                      >
+                        Articles ({candidateResults.candidates.filter(c => c.type !== 'youtube').length})
+                      </button>
+                    </div>
+
+                    <div className="candidates-quick-toggle">
+                      <button className="text-action-btn" onClick={() => handleSelectAll(filteredCandidates)}>
+                        Select All
+                      </button>
+                      <span>·</span>
+                      <button className="text-action-btn" onClick={handleDeselectAll}>
+                        Clear
+                      </button>
+                      <span className="selection-counter-badge">
+                        {selectedCandidates.length} selected
+                      </span>
+                    </div>
+                  </div>
+
+                  {filteredCandidates.length === 0 ? (
+                    <div className="empty-sub-state">No sources found for this filter.</div>
+                  ) : (
+                    <div className="unified-candidates-list">
+                      {filteredCandidates.map((cand, idx) => {
+                        const isSel = selectedCandidates.some(c => c.url === cand.url);
+                        return (
+                          <div
+                            key={cand.id || idx}
+                            className={`unified-candidate-card ${isSel ? 'selected' : ''}`}
+                            onClick={() => toggleCandidateSelection(cand)}
+                          >
+                            <div className="candidate-select-col">
+                              <div className={`custom-checkbox ${isSel ? 'checked' : ''}`}>
+                                {isSel && <IconCheck size={12} />}
+                              </div>
+                            </div>
+
+                            {cand.thumbnail && (
+                              <div className="candidate-thumb-col">
+                                <img src={cand.thumbnail} alt="" className="candidate-thumb-img" />
+                                {cand.duration && <span className="duration-pill">{cand.duration}</span>}
+                              </div>
+                            )}
+
+                            <div className="candidate-details-col">
+                              <div className="candidate-meta-line">
+                                <span className={`source-type-pill ${cand.type}`}>
+                                  {cand.type === 'youtube' ? <IconYoutube size={12} /> : <IconGlobe size={12} />}
+                                  {cand.type === 'youtube' ? 'YouTube' : 'Article'}
+                                </span>
+                                <span className="candidate-source-name">{cand.channel_or_source}</span>
+                              </div>
+                              <div className="candidate-title-text">{cand.title}</div>
+                              {cand.snippet && <div className="candidate-snippet-text">{cand.snippet}</div>}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  <div className="modal-footer" style={{ marginTop: '16px' }}>
+                    <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
+                    <button
+                      type="button"
+                      className="btn-primary"
+                      onClick={handleImportCandidates}
+                      disabled={selectedCandidates.length === 0 || isAddingCandidates}
+                    >
+                      Add {selectedCandidates.length} Selected to Sources
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* TAB 2: File Upload (PDF, TXT) */}
           {activeTab === 'upload' && (
             <form onSubmit={handleFileUpload} className="tab-pane">
-              <div className="dropzone-area">
+              <div
+                className={`file-drop-zone ${selectedFile ? 'has-file' : ''}`}
+                onClick={() => document.getElementById('file-input-field').click()}
+              >
                 <input
+                  id="file-input-field"
                   type="file"
-                  id="source-file-input"
-                  accept=".pdf,.txt,.md,.csv,.json"
-                  onChange={(e) => setSelectedFile(e.target.files[0])}
+                  accept=".pdf,.txt,.md"
                   style={{ display: 'none' }}
+                  onChange={(e) => {
+                    if (e.target.files && e.target.files[0]) {
+                      setSelectedFile(e.target.files[0]);
+                    }
+                  }}
                 />
-                <label htmlFor="source-file-input" className="dropzone-label">
-                  <div className="dropzone-icon">
-                    <IconUpload size={32} />
+                <div className="drop-icon-wrap">
+                  <IconUpload size={32} />
+                </div>
+                {selectedFile ? (
+                  <div className="selected-file-meta">
+                    <span className="file-name">{selectedFile.name}</span>
+                    <span className="file-size">({(selectedFile.size / 1024 / 1024).toFixed(2)} MB)</span>
                   </div>
-                  <div className="dropzone-text">
-                    {selectedFile ? (
-                      <span className="file-name-highlight">{selectedFile.name} ({(selectedFile.size / 1024).toFixed(1)} KB)</span>
-                    ) : (
-                      <>
-                        <strong>Choose a document</strong> or drag and drop
-                        <span className="dropzone-hint">PDF, TXT, Markdown, CSV up to 25MB (Saved to AWS S3)</span>
-                      </>
-                    )}
-                  </div>
-                </label>
+                ) : (
+                  <>
+                    <div className="drop-title">Click to upload PDF, TXT, or MD</div>
+                    <div className="drop-sub">Saved directly to AWS S3 & indexed for research</div>
+                  </>
+                )}
               </div>
 
               <div className="modal-footer">
@@ -223,20 +390,20 @@ export default function AddSourceModal({ notebookId, isOpen, onClose, onSourceAd
                   disabled={!selectedFile || isUploading}
                 >
                   {isUploading ? (
-                    <><IconLoader size={16} className="spin" /> Indexing Document...</>
+                    <><IconLoader size={16} className="spin" /> Uploading to S3 & Indexing...</>
                   ) : (
-                    'Upload & Index'
+                    'Upload & Add Source'
                   )}
                 </button>
               </div>
             </form>
           )}
 
-          {/* TAB 2: Web / YouTube URL */}
+          {/* TAB 3: Direct URL Import */}
           {activeTab === 'link' && (
             <form onSubmit={handleAddLink} className="tab-pane">
               <div className="form-group">
-                <label className="form-label">Web URL or YouTube Video Link</label>
+                <label className="form-label">Web Article or YouTube Video URL</label>
                 <input
                   type="url"
                   className="form-input"
@@ -245,15 +412,14 @@ export default function AddSourceModal({ notebookId, isOpen, onClose, onSourceAd
                   onChange={(e) => setLinkUrl(e.target.value)}
                   required
                 />
-                <span className="form-hint">YouTube transcripts and article texts are extracted and embedded automatically.</span>
               </div>
 
               <div className="form-group">
-                <label className="form-label">Optional Custom Title</label>
+                <label className="form-label">Custom Title (Optional)</label>
                 <input
                   type="text"
                   className="form-input"
-                  placeholder="e.g. Deep Learning Transformer Architecture"
+                  placeholder="e.g. In-Depth Technical Overview"
                   value={linkTitle}
                   onChange={(e) => setLinkTitle(e.target.value)}
                 />
@@ -267,87 +433,13 @@ export default function AddSourceModal({ notebookId, isOpen, onClose, onSourceAd
                   disabled={!linkUrl.trim() || isAddingLink}
                 >
                   {isAddingLink ? (
-                    <><IconLoader size={16} className="spin" /> Extracting & Indexing...</>
+                    <><IconLoader size={16} className="spin" /> Extracting Content...</>
                   ) : (
                     'Add Source'
                   )}
                 </button>
               </div>
             </form>
-          )}
-
-          {/* TAB 3: Discover from Topic */}
-          {activeTab === 'generate' && (
-            <div className="tab-pane">
-              <form onSubmit={handleDiscoverPrompt} className="search-box-row">
-                <input
-                  type="text"
-                  className="form-input"
-                  placeholder="e.g. Quantum Computing algorithms and real world use cases"
-                  value={prompt}
-                  onChange={(e) => setPrompt(e.target.value)}
-                  disabled={isSearching}
-                />
-                <button
-                  type="submit"
-                  className="btn-primary"
-                  disabled={!prompt.trim() || isSearching}
-                >
-                  {isSearching ? <IconLoader size={16} className="spin" /> : <IconSparkles size={16} />}
-                  Find Sources
-                </button>
-              </form>
-
-              {candidateResults && (
-                <div className="candidates-list-wrap">
-                  <div className="candidates-header">
-                    <span>Generated {candidateResults.candidates.length} sources across YouTube & Web</span>
-                    <span className="candidates-selected-count">Selected: {selectedCandidates.length}/5</span>
-                  </div>
-
-                  <div className="candidates-grid">
-                    {candidateResults.candidates.map((cand, idx) => {
-                      const isSel = selectedCandidates.some(c => c.url === cand.url);
-                      return (
-                        <div
-                          key={idx}
-                          className={`candidate-card ${isSel ? 'selected' : ''}`}
-                          onClick={() => toggleCandidateSelection(cand)}
-                        >
-                          <div className="candidate-card-top">
-                            <span className={`source-type-pill ${cand.type}`}>
-                              {cand.type === 'youtube' ? <IconYoutube size={13} /> : <IconGlobe size={13} />}
-                              {cand.type === 'youtube' ? 'YouTube Video' : 'Web Article'}
-                            </span>
-                            <div className={`checkbox-circle ${isSel ? 'checked' : ''}`}>
-                              {isSel && <IconCheck size={12} />}
-                            </div>
-                          </div>
-                          <div className="candidate-title">{cand.title}</div>
-                          <div className="candidate-snippet">{cand.snippet}</div>
-                        </div>
-                      );
-                    })}
-                  </div>
-
-                  <div className="modal-footer" style={{ marginTop: '16px' }}>
-                    <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
-                    <button
-                      type="button"
-                      className="btn-primary"
-                      onClick={handleImportCandidates}
-                      disabled={selectedCandidates.length === 0 || isAddingCandidates}
-                    >
-                      {isAddingCandidates ? (
-                        <><IconLoader size={16} className="spin" /> Ingesting Transcripts...</>
-                      ) : (
-                        `Import & Index ${selectedCandidates.length} Selected`
-                      )}
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
           )}
         </div>
       </div>

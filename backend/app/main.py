@@ -1,6 +1,7 @@
 import os
 import json
 import logging
+import asyncio
 from typing import List, Optional
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -8,24 +9,24 @@ from sqlalchemy.orm import Session
 
 from .config import settings
 from .database import get_db, init_db
-from .models import Notebook, Source, ChatMessage, StudioNote, DocumentChunk
+from .models import Notebook, Source, ChatMessage, StudioNote, DocumentChunk, NotebookNote
 from .schemas import (
     NotebookCreate, NotebookUpdate, NotebookResponse, NotebookDetailResponse,
     SourceResponse, SourceDetailResponse, SourceToggleRequest,
     AddUrlSourceRequest, GenerateSourcesRequest, CandidateSourcesResponse, CandidateSourceItem,
     AddSelectedSourcesRequest, ChatRequest, ChatMessageResponse,
+    NoteResponse, NoteUpdateRequest, NoteAppendRequest,
     GenerateStudioNoteRequest, StudioNoteResponse
 )
 from .aws_service import storage_service, parse_uploaded_document
 from .rag import index_source, delete_source_index, retrieve_context_chunks
 from .llm import (
-    generate_search_queries as plan_queries,
     summarize_text,
     generate_grounded_answer,
     generate_studio_note
 )
 from .scrapers import (
-    fetch_media_for_queries,
+    discover_google_sources,
     fetch_youtube_transcript_text,
     fetch_article_text,
     extract_youtube_video_id
@@ -39,8 +40,8 @@ init_db()
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
-    description="Full-stack AI Research Assistant modeled after Google NotebookLM with Meta Llama 3.3 70B and AWS integration.",
-    version="2.0.0"
+    description="Full-stack AI Research Assistant modeled after Google NotebookLM with DeepSeek-R1 / Qwen / Llama and AWS integration.",
+    version="2.1.0"
 )
 
 app.add_middleware(
@@ -55,15 +56,23 @@ app.add_middleware(
 # ─── System & Health ──────────────────────────────────────────
 @app.get("/api/health")
 def health_check():
-    active_llm = "Meta Llama 3.3 70B (Groq)" if settings.GROQ_API_KEY else (
-        f"Meta Llama ({settings.HF_LLAMA_MODEL})" if settings.HF_TOKEN else (
-            f"Google Gemini ({settings.DEFAULT_GEMINI_MODEL})" if settings.GOOGLE_API_KEY else "None"
+    active_llm = (
+        f"DeepSeek-R1 (Groq: {getattr(settings, 'GROQ_MODEL', 'deepseek-r1-distill-llama-70b')})"
+        if settings.GROQ_API_KEY
+        else (
+            f"DeepSeek-R1 / Qwen ({getattr(settings, 'HF_MODEL', 'deepseek-ai/DeepSeek-R1-Distill-Qwen-7B')})"
+            if settings.HF_TOKEN
+            else (
+                f"Google Gemini ({settings.DEFAULT_GEMINI_MODEL})"
+                if settings.GOOGLE_API_KEY
+                else "None"
+            )
         )
     )
     return {
         "status": "healthy",
         "llm_engine": active_llm,
-        "database": "PostgreSQL" if "postgresql" in settings.DATABASE_URL else "SQLite (Local/RDS Ready)",
+        "database": "PostgreSQL (AWS RDS)" if "postgresql" in settings.DATABASE_URL else "SQLite (Local/Resilient)",
         "aws_s3_connected": storage_service.use_s3,
         "aws_region": settings.AWS_REGION if storage_service.use_s3 else "local-storage"
     }
@@ -92,6 +101,12 @@ def create_notebook(payload: NotebookCreate, db: Session = Depends(get_db)):
     db.add(nb)
     db.commit()
     db.refresh(nb)
+
+    # Initialize empty manual note
+    manual_note = NotebookNote(notebook_id=nb.id, content="")
+    db.add(manual_note)
+    db.commit()
+
     return NotebookResponse(
         id=nb.id,
         title=nb.title,
@@ -125,12 +140,21 @@ def get_notebook_detail(notebook_id: str, db: Session = Depends(get_db)):
             created_at=msg.created_at
         ))
 
+    # Fetch or auto-create manual note
+    manual_note = db.query(NotebookNote).filter(NotebookNote.notebook_id == notebook_id).first()
+    if not manual_note:
+        manual_note = NotebookNote(notebook_id=notebook_id, content="")
+        db.add(manual_note)
+        db.commit()
+        db.refresh(manual_note)
+
     return NotebookDetailResponse(
         id=nb.id,
         title=nb.title,
         description=nb.description or "",
         sources=nb.sources,
         messages=messages_data,
+        manual_note=manual_note,
         notes=nb.notes,
         created_at=nb.created_at,
         updated_at=nb.updated_at
@@ -166,6 +190,63 @@ def delete_notebook(notebook_id: str, db: Session = Depends(get_db)):
     db.delete(nb)
     db.commit()
     return None
+
+
+# ─── Manual Notebook Notes Endpoints ──────────────────────────
+@app.get("/api/notebooks/{notebook_id}/note", response_model=NoteResponse)
+def get_notebook_note(notebook_id: str, db: Session = Depends(get_db)):
+    nb = db.query(Notebook).filter(Notebook.id == notebook_id).first()
+    if not nb:
+        raise HTTPException(status_code=404, detail="Notebook not found")
+    note = db.query(NotebookNote).filter(NotebookNote.notebook_id == notebook_id).first()
+    if not note:
+        note = NotebookNote(notebook_id=notebook_id, content="")
+        db.add(note)
+        db.commit()
+        db.refresh(note)
+    return note
+
+
+@app.put("/api/notebooks/{notebook_id}/note", response_model=NoteResponse)
+def update_notebook_note(notebook_id: str, payload: NoteUpdateRequest, db: Session = Depends(get_db)):
+    nb = db.query(Notebook).filter(Notebook.id == notebook_id).first()
+    if not nb:
+        raise HTTPException(status_code=404, detail="Notebook not found")
+
+    note = db.query(NotebookNote).filter(NotebookNote.notebook_id == notebook_id).first()
+    if not note:
+        note = NotebookNote(notebook_id=notebook_id, content=payload.content)
+        db.add(note)
+    else:
+        note.content = payload.content
+    db.commit()
+    db.refresh(note)
+    return note
+
+
+@app.post("/api/notebooks/{notebook_id}/note/append", response_model=NoteResponse)
+def append_to_notebook_note(notebook_id: str, payload: NoteAppendRequest, db: Session = Depends(get_db)):
+    nb = db.query(Notebook).filter(Notebook.id == notebook_id).first()
+    if not nb:
+        raise HTTPException(status_code=404, detail="Notebook not found")
+
+    text_to_append = payload.text.strip()
+    if not text_to_append:
+        raise HTTPException(status_code=400, detail="Text to append cannot be empty.")
+
+    note = db.query(NotebookNote).filter(NotebookNote.notebook_id == notebook_id).first()
+    if not note:
+        note = NotebookNote(notebook_id=notebook_id, content=text_to_append)
+        db.add(note)
+    else:
+        if note.content and note.content.strip():
+            note.content = f"{note.content.rstrip()}\n\n{text_to_append}"
+        else:
+            note.content = text_to_append
+
+    db.commit()
+    db.refresh(note)
+    return note
 
 
 # ─── Sources Management ───────────────────────────────────────
@@ -205,7 +286,9 @@ async def upload_file_source(
         summary=summary,
         content=text_content,
         word_count=word_count,
-        is_active=True
+        is_active=True,
+        extraction_status="success",
+        extraction_error=None
     )
     db.add(source)
     db.commit()
@@ -233,14 +316,14 @@ async def add_url_source(
 
     if is_yt:
         title = payload.title or "YouTube Video"
-        content = await fetch_youtube_transcript_text(url, title)
+        content, extract_status, extract_err = await fetch_youtube_transcript_text(url, title)
         source_type = "youtube"
     else:
         title = payload.title or "Web Article"
-        content = await fetch_article_text(url, title)
+        content, extract_status, extract_err = await fetch_article_text(url, title)
         source_type = "web"
 
-    summary = summarize_text(content, max_sentences=2)
+    summary = summarize_text(content, max_sentences=2) if extract_status != "failed" else (extract_err or "Extraction failed.")
     words = len(content.split())
 
     source = Source(
@@ -251,13 +334,17 @@ async def add_url_source(
         summary=summary,
         content=content,
         word_count=words,
-        is_active=True
+        is_active=(extract_status != "failed"),
+        extraction_status=extract_status,
+        extraction_error=extract_err
     )
     db.add(source)
     db.commit()
     db.refresh(source)
 
-    index_source(db, notebook_id, source.id, source.title, content)
+    if extract_status != "failed":
+        index_source(db, notebook_id, source.id, source.title, content)
+
     return source
 
 
@@ -267,37 +354,24 @@ async def generate_candidate_sources(
     payload: GenerateSourcesRequest,
     db: Session = Depends(get_db)
 ):
-    """Generates search queries from a prompt and searches YouTube and Web for candidate sources."""
+    """
+    Directly queries Google Search API via SerpAPI for articles and YouTube videos
+    in one unified fast call (< 1.5s).
+    """
     nb = db.query(Notebook).filter(Notebook.id == notebook_id).first()
     if not nb:
         raise HTTPException(status_code=404, detail="Notebook not found")
 
     prompt = payload.prompt.strip()
     if not prompt:
-        raise HTTPException(status_code=400, detail="Prompt cannot be empty.")
+        raise HTTPException(status_code=400, detail="Search topic cannot be empty.")
 
-    queries = plan_queries(prompt)
-    media_results = await fetch_media_for_queries(queries)
-
-    candidates: List[CandidateSourceItem] = []
-    # YouTube candidates
-    for yt in media_results.get("youtube", []):
-        candidates.append(CandidateSourceItem(
-            title=yt.title,
-            url=yt.link,
-            type="youtube",
-            snippet=yt.snippet or f"Channel: {yt.channel}"
-        ))
-    # Article candidates
-    for art in media_results.get("articles", []):
-        candidates.append(CandidateSourceItem(
-            title=art.title,
-            url=art.link,
-            type="web",
-            snippet=art.snippet or f"Source: {art.source}"
-        ))
-
-    return CandidateSourcesResponse(queries=queries, candidates=candidates)
+    try:
+        candidates = await discover_google_sources(prompt)
+        return CandidateSourcesResponse(query=prompt, candidates=candidates)
+    except Exception as e:
+        logger.error(f"Discover from topic search failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Search failed: {str(e)[:150]}")
 
 
 @app.post("/api/notebooks/{notebook_id}/sources/add-candidates", response_model=List[SourceResponse])
@@ -306,36 +380,59 @@ async def add_candidate_sources(
     payload: AddSelectedSourcesRequest,
     db: Session = Depends(get_db)
 ):
-    """Downloads full transcripts/articles for selected candidate sources and indexes them."""
+    """
+    Extracts transcripts and articles for selected candidates IN PARALLEL with timeouts,
+    records extraction_status ('success' | 'failed'), and indexes into RAG.
+    """
     nb = db.query(Notebook).filter(Notebook.id == notebook_id).first()
     if not nb:
         raise HTTPException(status_code=404, detail="Notebook not found")
 
-    added_sources = []
-    for item in payload.candidates[:6]:  # max 6 at once
-        if item.type == "youtube":
-            content = await fetch_youtube_transcript_text(item.url, item.title)
-        else:
-            content = await fetch_article_text(item.url, item.title)
+    selected = payload.candidates[:8]  # Process up to 8 selections
 
-        summary = summarize_text(content, max_sentences=2)
+    async def extract_one(item: CandidateSourceItem):
+        try:
+            if item.type == "youtube":
+                content, stat, err = await fetch_youtube_transcript_text(item.url, item.title)
+                src_type = "youtube"
+            else:
+                content, stat, err = await fetch_article_text(item.url, item.title)
+                src_type = "web"
+            return item, content, src_type, stat, err
+        except Exception as e:
+            return item, f"Title: {item.title}\nURL: {item.url}", item.type, "failed", str(e)
+
+    # Run extraction in parallel
+    results = await asyncio.gather(*[extract_one(item) for item in selected])
+
+    added_sources: List[Source] = []
+    for item, content, src_type, extract_status, extract_err in results:
         words = len(content.split())
+        summary = (
+            summarize_text(content, max_sentences=2)
+            if extract_status != "failed"
+            else (extract_err or "Extraction failed. No content available.")
+        )
 
         source = Source(
             notebook_id=notebook_id,
             title=item.title,
-            source_type=item.type,
+            source_type=src_type,
             original_url=item.url,
             summary=summary,
             content=content,
             word_count=words,
-            is_active=True
+            is_active=(extract_status != "failed"),
+            extraction_status=extract_status,
+            extraction_error=extract_err
         )
         db.add(source)
         db.commit()
         db.refresh(source)
 
-        index_source(db, notebook_id, source.id, source.title, content)
+        if extract_status != "failed":
+            index_source(db, notebook_id, source.id, source.title, content)
+
         added_sources.append(source)
 
     return added_sources
@@ -371,7 +468,7 @@ def delete_source(notebook_id: str, source_id: str, db: Session = Depends(get_db
     return None
 
 
-# ─── Chat & RAG (Meta Llama 3.3 70B Grounded) ─────────────────
+# ─── Chat & RAG (DeepSeek-R1 / Qwen Grounded) ──────────────────
 @app.post("/api/notebooks/{notebook_id}/chat", response_model=ChatMessageResponse)
 def chat_with_notebook(
     notebook_id: str,
@@ -390,7 +487,7 @@ def chat_with_notebook(
     if payload.source_ids is not None:
         allowed_source_ids = payload.source_ids
     else:
-        allowed_source_ids = [s.id for s in nb.sources if s.is_active]
+        allowed_source_ids = [s.id for s in nb.sources if s.is_active and s.extraction_status != "failed"]
 
     # Save User message in DB
     user_msg = ChatMessage(
@@ -417,7 +514,7 @@ def chat_with_notebook(
     ).order_by(ChatMessage.created_at.desc()).limit(8).all()
     history = [{"role": m.role, "content": m.content} for m in reversed(recent_msgs[:-1])]
 
-    # Generate answer with Meta Llama 3.3 70B & citations
+    # Generate answer with DeepSeek-R1 / Qwen & citations
     answer_text, citations = generate_grounded_answer(
         query=user_query,
         chunks=chunks,
@@ -452,29 +549,21 @@ def clear_chat_history(notebook_id: str, db: Session = Depends(get_db)):
     return None
 
 
-# ─── Studio / NotebookLM Guide Artifacts ───────────────────────
+# ─── Legacy Studio Endpoints (Preserved for compatibility) ────
 @app.post("/api/notebooks/{notebook_id}/studio/generate", response_model=StudioNoteResponse)
 def create_studio_note(
     notebook_id: str,
     payload: GenerateStudioNoteRequest,
     db: Session = Depends(get_db)
 ):
-    """
-    Generates a NotebookLM studio artifact:
-    - Study Guide
-    - Briefing Doc
-    - FAQ
-    - Audio Overview Podcast Script
-    """
     nb = db.query(Notebook).filter(Notebook.id == notebook_id).first()
     if not nb:
         raise HTTPException(status_code=404, detail="Notebook not found")
 
-    active_sources = [s for s in nb.sources if s.is_active]
+    active_sources = [s for s in nb.sources if s.is_active and s.extraction_status != "failed"]
     if not active_sources:
-        raise HTTPException(status_code=400, detail="No active sources in notebook to generate from. Please upload or add sources first.")
+        raise HTTPException(status_code=400, detail="No active sources in notebook to generate from.")
 
-    # Combine active source texts
     combined_text = "\n\n=== SOURCE ===\n\n".join([
         f"Title: {s.title}\n{s.content[:3500]}" for s in active_sources
     ])

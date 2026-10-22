@@ -50,5 +50,8 @@ export const IconExternalLink = icon(<><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0
 export const IconArrowLeft    = icon(<><path d="m12 19-7-7 7-7M19 12H5" /></>);
 export const IconCopy         = icon(<><rect width="14" height="14" x="8" y="8" rx="2" ry="2" /><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" /></>);
 export const IconLayers       = icon(<><polygon points="12 2 2 7 12 12 22 7 12 2" /><polyline points="2 17 12 22 22 17" /><polyline points="2 12 12 17 22 12" /></>);
+export const IconEye          = icon(<><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" /><circle cx="12" cy="12" r="3" /></>);
+export const IconDownload     = icon(<><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" /></>);
+export const IconAlertTriangle= icon(<><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3ZM12 9v4M12 17h.01" /></>);
 
 export default {};

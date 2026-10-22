@@ -18,6 +18,7 @@ class Notebook(Base):
 
     sources = relationship("Source", back_populates="notebook", cascade="all, delete-orphan", order_by="desc(Source.created_at)")
     messages = relationship("ChatMessage", back_populates="notebook", cascade="all, delete-orphan", order_by="ChatMessage.created_at")
+    manual_note = relationship("NotebookNote", back_populates="notebook", uselist=False, cascade="all, delete-orphan")
     notes = relationship("StudioNote", back_populates="notebook", cascade="all, delete-orphan", order_by="desc(StudioNote.created_at)")
 
 class Source(Base):
@@ -34,6 +35,8 @@ class Source(Base):
     content = Column(Text, nullable=False)
     word_count = Column(Integer, default=0)
     is_active = Column(Boolean, default=True)
+    extraction_status = Column(String(50), default="success")  # 'success' | 'failed' | 'partial'
+    extraction_error = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     notebook = relationship("Notebook", back_populates="sources")
@@ -63,6 +66,17 @@ class ChatMessage(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     notebook = relationship("Notebook", back_populates="messages")
+
+class NotebookNote(Base):
+    __tablename__ = "notebook_notes"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    notebook_id = Column(String(36), ForeignKey("notebooks.id", ondelete="CASCADE"), nullable=False, unique=True)
+    content = Column(Text, default="", nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    notebook = relationship("Notebook", back_populates="manual_note")
 
 class StudioNote(Base):
     __tablename__ = "studio_notes"

@@ -34,6 +34,8 @@ class SourceResponse(BaseModel):
     summary: Optional[str] = None
     word_count: int = 0
     is_active: bool = True
+    extraction_status: str = "success"  # 'success' | 'failed' | 'partial'
+    extraction_error: Optional[str] = None
     created_at: datetime
 
     class Config:
@@ -47,6 +49,7 @@ class CitationItem(BaseModel):
     source_id: str
     source_title: str
     snippet: str
+    full_snippet: Optional[str] = None
 
 class ChatMessageResponse(BaseModel):
     id: str
@@ -58,6 +61,22 @@ class ChatMessageResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+class NoteResponse(BaseModel):
+    id: str
+    notebook_id: str
+    content: str = ""
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+class NoteUpdateRequest(BaseModel):
+    content: str
+
+class NoteAppendRequest(BaseModel):
+    text: str
 
 class StudioNoteResponse(BaseModel):
     id: str
@@ -87,6 +106,7 @@ class NotebookDetailResponse(BaseModel):
     description: Optional[str] = ""
     sources: List[SourceResponse] = []
     messages: List[ChatMessageResponse] = []
+    manual_note: Optional[NoteResponse] = None
     notes: List[StudioNoteResponse] = []
     created_at: datetime
     updated_at: datetime
@@ -103,13 +123,17 @@ class GenerateSourcesRequest(BaseModel):
     prompt: str
 
 class CandidateSourceItem(BaseModel):
+    id: Optional[str] = None
     title: str
     url: str
     type: str  # 'youtube' | 'web'
     snippet: str
+    channel_or_source: Optional[str] = None
+    thumbnail: Optional[str] = None
+    duration: Optional[str] = None
 
 class CandidateSourcesResponse(BaseModel):
-    queries: List[str]
+    query: str
     candidates: List[CandidateSourceItem]
 
 class AddSelectedSourcesRequest(BaseModel):

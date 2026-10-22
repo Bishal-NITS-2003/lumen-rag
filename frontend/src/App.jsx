@@ -1,15 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import {
   IconLumen, IconArrowLeft, IconSun, IconMoon, IconSparkles,
-  IconEdit, IconDatabase, IconBook
+  IconEdit, IconDatabase, IconFileText
 } from './components/Icons';
 import NotebooksDashboard from './components/NotebooksDashboard';
 import SourcesPanel from './components/SourcesPanel';
 import ChatPanel from './components/ChatPanel';
-import StudioPanel from './components/StudioPanel';
+import NotesPanel from './components/NotesPanel';
 import AddSourceModal from './components/AddSourceModal';
 import SourceViewerModal from './components/SourceViewerModal';
-import NoteViewerModal from './components/NoteViewerModal';
 
 export default function App() {
   const [view, setView] = useState('dashboard'); // 'dashboard' | 'notebook'
@@ -23,7 +22,7 @@ export default function App() {
   // Modals
   const [isAddSourceOpen, setIsAddSourceOpen] = useState(false);
   const [viewingSourceId, setViewingSourceId] = useState(null);
-  const [viewingNote, setViewingNote] = useState(null);
+  const [citationHighlight, setCitationHighlight] = useState(null);
 
   // Title Editing
   const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -165,10 +164,21 @@ export default function App() {
     } catch {}
   };
 
+  // Open source viewer popup from left panel (eye icon)
+  const handleSelectSource = (sourceId) => {
+    setCitationHighlight(null);
+    setViewingSourceId(sourceId);
+  };
+
+  // Open source viewer popup from chat citation and scroll to cited passage
+  const handleSelectCitation = (sourceId, snippet) => {
+    setCitationHighlight(snippet);
+    setViewingSourceId(sourceId);
+  };
+
   // ── Chat handlers ─────────────────────────────────────────
   const handleSendMessage = async (text) => {
     setIsLoadingChat(true);
-    // Optimistic UI for user message
     const tempUserMsg = {
       id: 'temp_' + Date.now(),
       notebook_id: currentNotebookId,
@@ -199,7 +209,6 @@ export default function App() {
       }));
     } catch (err) {
       alert(`Chat error: ${err.message}`);
-      // Remove temporary message on failure
       setCurrentNotebook(prev => ({
         ...prev,
         messages: prev.messages.filter(m => m.id !== tempUserMsg.id)
@@ -217,23 +226,25 @@ export default function App() {
     } catch {}
   };
 
-  // ── Studio note handlers ──────────────────────────────────
-  const handleNoteGenerated = (newNote) => {
-    setCurrentNotebook(prev => ({
-      ...prev,
-      notes: [newNote, ...(prev?.notes || [])]
-    }));
-    setViewingNote(newNote); // Open automatically for user preview
-  };
-
-  const handleDeleteNote = async (noteId) => {
+  // ── Append user selection / message to Manual Notes ────────
+  const handleAddToNote = async (textToAdd) => {
+    if (!textToAdd || !textToAdd.trim()) return;
     try {
-      await fetch(`/api/notebooks/${currentNotebookId}/studio/${noteId}`, { method: 'DELETE' });
-      setCurrentNotebook(prev => ({
-        ...prev,
-        notes: prev.notes.filter(n => n.id !== noteId)
-      }));
-    } catch {}
+      const res = await fetch(`/api/notebooks/${currentNotebookId}/note/append`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: textToAdd.trim() })
+      });
+      if (res.ok) {
+        const updatedNote = await res.json();
+        setCurrentNotebook(prev => ({
+          ...prev,
+          manual_note: updatedNote
+        }));
+      }
+    } catch (err) {
+      console.error('Error appending text to note:', err);
+    }
   };
 
   return (
@@ -278,7 +289,7 @@ export default function App() {
         <div className="header-right-col">
           <div className="status-badge model-badge">
             <IconSparkles size={13} />
-            <span>{systemHealth?.llm_engine || 'Meta Llama 3.3 70B'}</span>
+            <span>{systemHealth?.llm_engine || 'DeepSeek-R1 / Qwen Reasoning'}</span>
           </div>
 
           <div className="status-badge db-badge">
@@ -307,16 +318,16 @@ export default function App() {
         />
       ) : (
         <div className="notebook-workspace-3col">
-          {/* Column 1: Sources */}
+          {/* Column 1: Sources with View eye icon & extraction error badge */}
           <SourcesPanel
             sources={currentNotebook?.sources || []}
             onOpenAddModal={() => setIsAddSourceOpen(true)}
             onToggleSource={handleToggleSource}
             onDeleteSource={handleDeleteSource}
-            onSelectSourceDetail={(sid) => setViewingSourceId(sid)}
+            onSelectSourceDetail={handleSelectSource}
           />
 
-          {/* Column 2: Grounded Chat */}
+          {/* Column 2: Grounded Chat with text selection -> Add to Note & Citation Scroll */}
           <ChatPanel
             notebookTitle={currentNotebook?.title || 'Notebook'}
             messages={currentNotebook?.messages || []}
@@ -324,17 +335,21 @@ export default function App() {
             isLoading={isLoadingChat}
             onSendMessage={handleSendMessage}
             onClearChat={handleClearChat}
-            onSelectSourceDetail={(sid) => setViewingSourceId(sid)}
+            onSelectCitation={handleSelectCitation}
+            onAddToNote={handleAddToNote}
           />
 
-          {/* Column 3: Studio Guide */}
-          <StudioPanel
+          {/* Column 3: Manual Notes Section with DB Sync & TXT Export */}
+          <NotesPanel
             notebookId={currentNotebookId}
-            notes={currentNotebook?.notes || []}
-            sourcesCount={currentNotebook?.sources?.filter(s => s.is_active)?.length || 0}
-            onNoteGenerated={handleNoteGenerated}
-            onSelectNote={(n) => setViewingNote(n)}
-            onDeleteNote={handleDeleteNote}
+            notebookTitle={currentNotebook?.title || 'Research_Notes'}
+            initialNote={currentNotebook?.manual_note}
+            onNoteUpdated={(updatedNote) => {
+              setCurrentNotebook(prev => ({
+                ...prev,
+                manual_note: updatedNote
+              }));
+            }}
           />
         </div>
       )}
@@ -351,14 +366,11 @@ export default function App() {
         notebookId={currentNotebookId}
         sourceId={viewingSourceId}
         isOpen={Boolean(viewingSourceId)}
-        onClose={() => setViewingSourceId(null)}
-      />
-
-      <NoteViewerModal
-        note={viewingNote}
-        isOpen={Boolean(viewingNote)}
-        onClose={() => setViewingNote(null)}
-        onDelete={handleDeleteNote}
+        onClose={() => {
+          setViewingSourceId(null);
+          setCitationHighlight(null);
+        }}
+        highlightSnippet={citationHighlight}
       />
     </div>
   );

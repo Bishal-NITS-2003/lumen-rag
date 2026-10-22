@@ -10,31 +10,32 @@ logger = logging.getLogger(__name__)
 
 def get_llm(temperature: float = 0.2):
     """
-    Returns the best available LLM:
-    1. Groq (Meta Llama 3.3 70B Versatile)
-    2. Hugging Face (Meta Llama 3.2 3B or 3.3 70B)
+    Returns the best available Open Source or fallback LLM:
+    1. Groq: DeepSeek-R1 Distill 70B (State-of-the-art Open Reasoning) or Llama 3.3 70B
+    2. Hugging Face: DeepSeek-R1 Distill Qwen or Qwen 2.5 7B Instruct
     3. Google Gemini (as resilient fallback)
     """
-    # 1. Groq (Fastest Meta Llama 3.3 70B)
+    # 1. Groq (DeepSeek-R1 Distill 70B or Llama 3.3 70B Versatile)
     if settings.GROQ_API_KEY:
         try:
             from langchain_groq import ChatGroq
             return ChatGroq(
                 groq_api_key=settings.GROQ_API_KEY,
-                model_name=settings.GROQ_LLAMA_MODEL,
+                model_name=getattr(settings, "GROQ_MODEL", "deepseek-r1-distill-llama-70b"),
                 temperature=temperature,
                 max_tokens=4096
             )
         except Exception as e:
             logger.warning(f"Groq initialization failed: {e}. Falling back.")
 
-    # 2. Hugging Face Llama
+    # 2. Hugging Face (DeepSeek-R1 or Qwen 2.5)
     if settings.HF_TOKEN:
         try:
             from langchain_community.llms import HuggingFaceHub
             from langchain_community.chat_models.huggingface import ChatHuggingFace
+            model_id = getattr(settings, "HF_MODEL", "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B")
             llm = HuggingFaceHub(
-                repo_id=settings.HF_LLAMA_MODEL,
+                repo_id=model_id,
                 huggingfacehub_api_token=settings.HF_TOKEN,
                 model_kwargs={"temperature": temperature, "max_new_tokens": 1024}
             )
@@ -143,7 +144,8 @@ def generate_grounded_answer(
             "citation_index": i,
             "source_id": source_id,
             "source_title": source_title,
-            "snippet": snippet[:250] + "..." if len(snippet) > 250 else snippet
+            "snippet": snippet[:250] + "..." if len(snippet) > 250 else snippet,
+            "full_snippet": snippet
         })
 
     formatted_context = "\n---\n".join(context_str_parts)
@@ -179,7 +181,12 @@ def generate_grounded_answer(
     all_messages = [SystemMessage(content=system_instruction)] + history_msgs + [HumanMessage(content=current_prompt)]
 
     response = llm.invoke(all_messages)
-    answer_text = response.content.strip()
+    raw_answer = response.content.strip()
+
+    # Clean potential DeepSeek-R1 <think> reasoning tokens
+    answer_text = re.sub(r'<think>.*?</think>', '', raw_answer, flags=re.DOTALL).strip()
+    if not answer_text:
+        answer_text = raw_answer
 
     # Find which citations were actually used in the answer
     used_indexes = set(map(int, re.findall(r"\[(\d+)\]", answer_text)))

@@ -1,6 +1,6 @@
 @echo off
 echo ==========================================================
-echo  Starting LUMEN NOTEBOOK: AI Research Assistant (Llama 3.3 70B)
+echo  Starting LUMEN NOTEBOOK: AI Research Assistant (DeepSeek-R1)
 echo ==========================================================
 
 start "FastAPI Backend" cmd /k "cd /d d:\Repositories\product-reviewer\backend && .\venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload"

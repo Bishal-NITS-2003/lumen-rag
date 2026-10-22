@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
   IconSend, IconTrash, IconSparkles, IconLoader,
-  IconFileText, IconExternalLink, IconBook
+  IconCopy, IconCheck, IconFileText, IconPlus
 } from './Icons';
 
 export default function ChatPanel({
@@ -11,17 +11,64 @@ export default function ChatPanel({
   isLoading,
   onSendMessage,
   onClearChat,
-  onSelectSourceDetail
+  onSelectCitation,
+  onAddToNote
 }) {
   const [inputText, setInputText] = useState('');
   const [hoveredCitation, setHoveredCitation] = useState(null);
-  const messagesEndRef = useRef(null);
+  const [selectionPopup, setSelectionPopup] = useState(null);
+  const [copiedId, setCopiedId] = useState(null);
+  const [toastMsg, setToastMsg] = useState('');
 
-  const activeSources = sources.filter(s => s.is_active);
+  const messagesEndRef = useRef(null);
+  const chatContainerRef = useRef(null);
+
+  const activeSources = sources.filter(s => s.is_active && s.extraction_status !== 'failed');
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isLoading]);
+
+  // Handle user text selection in chat messages to show floating "Add to Note"
+  const handleMouseUp = () => {
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed) {
+      setSelectionPopup(null);
+      return;
+    }
+
+    const selectedText = sel.toString().trim();
+    if (selectedText.length >= 3) {
+      try {
+        const range = sel.getRangeAt(0);
+        const rect = range.getBoundingClientRect();
+        setSelectionPopup({
+          text: selectedText,
+          top: rect.top - 46,
+          left: Math.max(16, rect.left + rect.width / 2 - 60)
+        });
+      } catch (err) {
+        setSelectionPopup(null);
+      }
+    } else {
+      setSelectionPopup(null);
+    }
+  };
+
+  const handleAddSelectionToNote = () => {
+    if (!selectionPopup?.text) return;
+    if (onAddToNote) {
+      onAddToNote(selectionPopup.text);
+      showToast('Appended selection to Research Notes!');
+    }
+    window.getSelection()?.removeAllRanges();
+    setSelectionPopup(null);
+  };
+
+  const showToast = (msg) => {
+    setToastMsg(msg);
+    setTimeout(() => setToastMsg(''), 2500);
+  };
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -37,6 +84,12 @@ export default function ChatPanel({
     }
   };
 
+  const handleCopyMessage = (id, text) => {
+    navigator.clipboard.writeText(text);
+    setCopiedId(id);
+    setTimeout(() => setCopiedId(null), 2000);
+  };
+
   const starterPrompts = [
     "Summarize the key ideas and conclusions across all sources",
     "What are the most significant findings and data points?",
@@ -50,7 +103,6 @@ export default function ChatPanel({
       return <div className="msg-text-plain">{content}</div>;
     }
 
-    // Split text by citation brackets e.g. [1], [2]
     const parts = content.split(/(\[\d+\])/g);
 
     return (
@@ -69,10 +121,17 @@ export default function ChatPanel({
               <span
                 key={i}
                 className="citation-pill"
-                onClick={() => citation.source_id && onSelectSourceDetail(citation.source_id)}
+                onClick={() => {
+                  if (citation.source_id && onSelectCitation) {
+                    onSelectCitation(
+                      citation.source_id,
+                      citation.full_snippet || citation.snippet
+                    );
+                  }
+                }}
                 onMouseEnter={() => setHoveredCitation(citation)}
                 onMouseLeave={() => setHoveredCitation(null)}
-                title={`[${index}] ${citation.source_title}`}
+                title={`[${index}] ${citation.source_title} - Click to jump to passage`}
               >
                 {index}
               </span>
@@ -85,7 +144,31 @@ export default function ChatPanel({
   };
 
   return (
-    <main className="chat-panel">
+    <main className="chat-panel" onMouseUp={handleMouseUp}>
+      {/* Toast Notification */}
+      {toastMsg && (
+        <div className="floating-toast">
+          <IconCheck size={14} /> {toastMsg}
+        </div>
+      )}
+
+      {/* Floating Selection Tooltip: Add to Note */}
+      {selectionPopup && (
+        <div
+          className="floating-selection-action"
+          style={{ top: `${selectionPopup.top}px`, left: `${selectionPopup.left}px` }}
+          onMouseDown={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            handleAddSelectionToNote();
+          }}
+        >
+          <button className="btn-add-to-note-float">
+            <IconPlus size={13} /> Add to Note
+          </button>
+        </div>
+      )}
+
       <div className="chat-panel-header">
         <div className="chat-panel-title-wrap">
           <h2 className="chat-notebook-name">{notebookTitle}</h2>
@@ -101,7 +184,7 @@ export default function ChatPanel({
         )}
       </div>
 
-      <div className="chat-messages-container">
+      <div className="chat-messages-container" ref={chatContainerRef}>
         {messages.length === 0 ? (
           <div className="chat-welcome-state">
             <div className="welcome-avatar">
@@ -110,7 +193,7 @@ export default function ChatPanel({
             <h3 className="welcome-heading">Chat with your research notebook</h3>
             <p className="welcome-sub">
               {activeSources.length > 0
-                ? `Answers are generated by Meta Llama 3.3 70B and grounded exclusively in your ${activeSources.length} active sources with source citations.`
+                ? `Answers are synthesized by DeepSeek-R1 / Qwen Reasoning and grounded exclusively in your ${activeSources.length} active sources with source citations.`
                 : 'Upload or discover sources in the left panel to begin querying your notebook.'}
             </p>
 
@@ -136,8 +219,29 @@ export default function ChatPanel({
                   {msg.role === 'assistant' && (
                     <div className="message-speaker-header">
                       <span className="assistant-badge">
-                        <IconSparkles size={13} /> Meta Llama 3.3 70B
+                        <IconSparkles size={13} /> DeepSeek-R1 Reasoning
                       </span>
+                      <div className="message-quick-actions">
+                        <button
+                          className="msg-action-btn"
+                          onClick={() => handleCopyMessage(msg.id || idx, msg.content)}
+                          title="Copy response"
+                        >
+                          {copiedId === (msg.id || idx) ? <IconCheck size={13} /> : <IconCopy size={13} />}
+                        </button>
+                        <button
+                          className="msg-action-btn"
+                          onClick={() => {
+                            if (onAddToNote) {
+                              onAddToNote(msg.content);
+                              showToast('Appended full response to Research Notes!');
+                            }
+                          }}
+                          title="Append entire response to Notes"
+                        >
+                          <IconFileText size={13} /> <span>Add to Note</span>
+                        </button>
+                      </div>
                     </div>
                   )}
 
@@ -147,13 +251,20 @@ export default function ChatPanel({
 
                   {msg.citations && msg.citations.length > 0 && (
                     <div className="message-citations-footer">
-                      <div className="citations-footer-label">Referenced Sources:</div>
+                      <div className="citations-footer-label">Referenced Sources (click to inspect passage):</div>
                       <div className="citations-pills-row">
                         {msg.citations.map((c) => (
                           <button
                             key={c.citation_index}
                             className="citation-footer-chip"
-                            onClick={() => c.source_id && onSelectSourceDetail(c.source_id)}
+                            onClick={() => {
+                              if (c.source_id && onSelectCitation) {
+                                onSelectCitation(
+                                  c.source_id,
+                                  c.full_snippet || c.snippet
+                                );
+                              }
+                            }}
                           >
                             <span className="cite-num">[{c.citation_index}]</span>
                             <span className="cite-name">{c.source_title}</span>
@@ -174,7 +285,7 @@ export default function ChatPanel({
                     <span />
                     <span />
                   </div>
-                  <span className="loading-text">Synthesizing grounded answer from sources...</span>
+                  <span className="loading-text">Synthesizing grounded answer with DeepSeek-R1...</span>
                 </div>
               </div>
             )}
@@ -201,7 +312,7 @@ export default function ChatPanel({
             className="chat-textarea"
             placeholder={
               activeSources.length === 0
-                ? "Add at least one source in the left panel to begin..."
+                ? "Add at least one active source in the left panel to begin..."
                 : "Ask a grounded question about your sources..."
             }
             value={inputText}
@@ -219,7 +330,7 @@ export default function ChatPanel({
           </button>
         </form>
         <div className="chat-input-hint">
-          {activeSources.length} sources active · Press Enter to send, Shift+Enter for newline
+          {activeSources.length} sources active · Highlight any text to Add to Notes · Enter to send
         </div>
       </div>
     </main>

@@ -1,5 +1,5 @@
 Write-Host "==========================================================" -ForegroundColor Cyan
-Write-Host " Starting LUMEN NOTEBOOK: AI Research Assistant (Llama 3.3 70B)" -ForegroundColor Green
+Write-Host " Starting LUMEN NOTEBOOK: AI Research Assistant (DeepSeek-R1)" -ForegroundColor Green
 Write-Host "==========================================================" -ForegroundColor Cyan
 
 # 1. Start FastAPI backend

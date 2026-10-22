@@ -11,12 +11,12 @@ class Settings(BaseSettings):
     # Database
     DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./notebooks.db").strip()
     
-    # Model API Keys
+    # Model API Keys (State-of-the-art Open Source Models: DeepSeek-R1 & Qwen 2.5)
     GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "").strip()
-    GROQ_LLAMA_MODEL: str = os.getenv("GROQ_LLAMA_MODEL", "llama-3.3-70b-versatile").strip()
+    GROQ_MODEL: str = os.getenv("GROQ_MODEL", os.getenv("GROQ_LLAMA_MODEL", "deepseek-r1-distill-llama-70b")).strip()
     
     HF_TOKEN: str = (os.getenv("HF_TOKEN") or os.getenv("HUGGINGFACEHUB_API_TOKEN") or "").strip()
-    HF_LLAMA_MODEL: str = os.getenv("HF_LLAMA_MODEL", "meta-llama/Llama-3.2-3B-Instruct").strip()
+    HF_MODEL: str = os.getenv("HF_MODEL", os.getenv("HF_LLAMA_MODEL", "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B")).strip()
     HF_EMBEDDING_MODEL: str = os.getenv("HF_EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2").strip()
     
     GOOGLE_API_KEY: str = os.getenv("GOOGLE_API_KEY", "").strip()
