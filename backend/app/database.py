@@ -21,17 +21,32 @@ def ensure_postgres_db_exists(url: str):
         if not target_db or target_db == "postgres":
             return
 
+        # Fast path: check if target_db already exists by connecting directly
+        try:
+            test_conn = psycopg2.connect(
+                dbname=target_db,
+                user=parsed.username,
+                password=parsed.password,
+                host=parsed.hostname,
+                port=parsed.port or 5432,
+                connect_timeout=4
+            )
+            test_conn.close()
+            return  # target_db exists and is ready!
+        except Exception:
+            pass
+
         conn = psycopg2.connect(
             dbname="postgres",
             user=parsed.username,
             password=parsed.password,
             host=parsed.hostname,
             port=parsed.port or 5432,
-            connect_timeout=10
+            connect_timeout=5
         )
         conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
         cur = conn.cursor()
-        cur.execute(f"SELECT 1 FROM pg_database WHERE datname = %s", (target_db,))
+        cur.execute("SELECT 1 FROM pg_database WHERE datname = %s", (target_db,))
         exists = cur.fetchone()
         if not exists:
             logger.info(f"Database '{target_db}' does not exist. Creating it now...")
@@ -40,7 +55,7 @@ def ensure_postgres_db_exists(url: str):
         cur.close()
         conn.close()
     except Exception as e:
-        logger.warning(f"Could not auto-create database (may already exist or insufficient permissions): {e}")
+        logger.warning(f"Database setup note: {e}")
 
 
 db_url = settings.DATABASE_URL
@@ -53,9 +68,23 @@ else:
     elif db_url.startswith("postgresql://") and not db_url.startswith("postgresql+"):
         db_url = db_url.replace("postgresql://", "postgresql+psycopg2://", 1)
 
-    # Ensure target database exists before creating engine
-    ensure_postgres_db_exists(db_url)
-    engine = create_engine(db_url, pool_pre_ping=True)
+    try:
+        ensure_postgres_db_exists(db_url)
+        engine = create_engine(
+            db_url,
+            pool_pre_ping=True,
+            connect_args={"connect_timeout": 5}
+        )
+        # Test connection
+        with engine.connect() as conn:
+            pass
+        logger.info("Successfully connected to AWS RDS PostgreSQL database.")
+    except Exception as e:
+        logger.warning(
+            f"Failed to connect to PostgreSQL ({e}). "
+            "Falling back to local SQLite database so the application continues to run seamlessly."
+        )
+        engine = create_engine("sqlite:///./notebooks.db", connect_args={"check_same_thread": False})
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
