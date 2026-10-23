@@ -1,11 +1,13 @@
 import React from 'react';
 import {
   IconPlus, IconTrash, IconYoutube, IconGlobe, IconFileText,
-  IconUpload, IconEye, IconAlertTriangle
+  IconUpload, IconEye, IconAlertTriangle, IconLoader
 } from './Icons';
 
 export default function SourcesPanel({
   sources = [],
+  isLoading = false,
+  deletingSourceId = null,
   onOpenAddModal,
   onDeleteSource,
   onSelectSourceDetail
@@ -49,7 +51,20 @@ export default function SourcesPanel({
       </div>
 
       <div className="sources-scroll-list">
-        {sources.length === 0 ? (
+        {isLoading ? (
+          <div className="sources-skeleton-list">
+            {[1, 2, 3].map(i => (
+              <div key={i} className="skeleton-source-item">
+                <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                  <div className="skeleton" style={{ width: '24px', height: '24px', borderRadius: '6px', flexShrink: 0 }} />
+                  <div className="skeleton skeleton-line medium" style={{ height: '14px' }} />
+                </div>
+                <div className="skeleton skeleton-line full" style={{ height: '11px', marginTop: '4px' }} />
+                <div className="skeleton skeleton-line short" style={{ height: '11px' }} />
+              </div>
+            ))}
+          </div>
+        ) : sources.length === 0 ? (
           <div className="empty-sources-container">
             <div className="empty-sources-icon">
               <IconUpload size={28} />
@@ -135,10 +150,15 @@ export default function SourcesPanel({
                   </button>
                   <button
                     className="source-delete-btn"
-                    title="Delete source from database and notebook"
+                    title={deletingSourceId === src.id ? "Deleting source..." : "Delete source from database and notebook"}
+                    disabled={deletingSourceId === src.id}
                     onClick={(e) => handleDelete(e, src)}
                   >
-                    <IconTrash size={14} />
+                    {deletingSourceId === src.id ? (
+                      <IconLoader size={14} className="spin" />
+                    ) : (
+                      <IconTrash size={14} />
+                    )}
                   </button>
                 </div>
               </div>

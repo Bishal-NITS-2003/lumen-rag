@@ -12,15 +12,15 @@ export default function NotesPanel({
   const saveTimeoutRef = useRef(null);
   const isFirstLoad = useRef(true);
 
-  // Sync initial note when notebook changes
+  // Sync initial note when notebook or note content changes
   useEffect(() => {
     if (initialNote && initialNote.notebook_id === notebookId) {
       setContent(initialNote.content || '');
       setSaveStatus('saved');
-    } else {
+    } else if (notebookId) {
       fetchNote();
     }
-  }, [notebookId]);
+  }, [notebookId, initialNote?.content, initialNote?.updated_at]);
 
   const fetchNote = async () => {
     try {

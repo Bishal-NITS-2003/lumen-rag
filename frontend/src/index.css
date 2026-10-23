@@ -3060,3 +3060,124 @@ body {
   align-items: center;
   gap: 4px;
 }
+
+/* ─────────────────────────────────────────────────────────── */
+/* ── Universal Rotation & Loader Animations ────────────────── */
+/* ─────────────────────────────────────────────────────────── */
+.spin,
+.lucide-spin,
+.spin-loader {
+  animation: spinLoader 0.75s linear infinite !important;
+  transform-origin: center;
+  display: inline-block;
+}
+
+@keyframes spinLoader {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ─────────────────────────────────────────────────────────── */
+/* ── Skeleton Loading Shimmer System ──────────────────────── */
+/* ─────────────────────────────────────────────────────────── */
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--bg-subtle) 25%,
+    var(--bg-hover) 50%,
+    var(--bg-subtle) 75%
+  );
+  background-size: 200% 100%;
+  animation: skeletonShimmer 1.5s ease-in-out infinite;
+  border-radius: var(--r-sm);
+  display: block;
+}
+
+@keyframes skeletonShimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.skeleton-card {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  padding: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 160px;
+}
+
+.skeleton-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--r-md);
+}
+
+.skeleton-line {
+  height: 14px;
+  border-radius: 4px;
+}
+
+.skeleton-line.short {
+  width: 40%;
+}
+
+.skeleton-line.medium {
+  width: 70%;
+}
+
+.skeleton-line.full {
+  width: 100%;
+}
+
+.skeleton-source-item {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+/* ─────────────────────────────────────────────────────────── */
+/* ── Action Bar Google Button & Deleting Button State ─────── */
+/* ─────────────────────────────────────────────────────────── */
+.btn-google-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 8px 14px;
+  border-radius: var(--r-md);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition);
+}
+
+.btn-google-action:hover {
+  border-color: var(--primary);
+  background: var(--bg-subtle);
+  box-shadow: var(--shadow-sm);
+}
+
+.notebook-delete-btn:disabled,
+.source-delete-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  pointer-events: none;
+}

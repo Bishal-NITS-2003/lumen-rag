@@ -3,6 +3,8 @@ import { IconLumen, IconPlus, IconTrash, IconBook, IconSparkles, IconLayers, Ico
 
 export default function NotebooksDashboard({
   notebooks = [],
+  isLoading = false,
+  deletingNotebookId = null,
   user = null,
   onGoogleSignIn,
   onCreateNotebook,
@@ -72,14 +74,41 @@ export default function NotebooksDashboard({
           )}
         </div>
 
-        <button className="btn-primary" onClick={handleOpenCreateModal}>
-          <IconPlus size={16} /> New Notebook
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          {!user && (
+            <button
+              type="button"
+              className="btn-google-action"
+              onClick={onGoogleSignIn}
+            >
+              <IconGoogle size={15} />
+              <span>Sign in with Google</span>
+            </button>
+          )}
+          <button className="btn-primary" onClick={handleOpenCreateModal}>
+            <IconPlus size={16} /> New Notebook
+          </button>
+        </div>
       </div>
 
       {/* Notebooks Grid */}
       <div className="notebooks-grid">
-        {notebooks.length === 0 ? (
+        {isLoading ? (
+          [1, 2, 3, 4, 5, 6].map(i => (
+            <div key={i} className="skeleton-card">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div className="skeleton skeleton-icon" />
+                <div className="skeleton" style={{ width: '22px', height: '22px', borderRadius: '4px' }} />
+              </div>
+              <div className="skeleton skeleton-line medium" style={{ height: '18px', marginTop: '6px' }} />
+              <div className="skeleton skeleton-line full" style={{ height: '12px' }} />
+              <div style={{ marginTop: 'auto', display: 'flex', justifyContent: 'space-between' }}>
+                <div className="skeleton skeleton-line short" style={{ height: '12px' }} />
+                <div className="skeleton skeleton-line short" style={{ height: '12px', width: '25%' }} />
+              </div>
+            </div>
+          ))
+        ) : notebooks.length === 0 ? (
           !user ? (
             <div className="empty-dashboard-card" onClick={handleOpenCreateModal}>
               <div className="empty-icon-wrap">
@@ -122,7 +151,8 @@ export default function NotebooksDashboard({
                 <button
                   type="button"
                   className="notebook-delete-btn"
-                  title="Delete notebook"
+                  title={deletingNotebookId === nb.id ? "Deleting..." : "Delete notebook"}
+                  disabled={deletingNotebookId === nb.id}
                   onPointerDown={(e) => e.stopPropagation()}
                   onMouseDown={(e) => e.stopPropagation()}
                   onClick={(e) => {
@@ -133,7 +163,11 @@ export default function NotebooksDashboard({
                     }
                   }}
                 >
-                  <IconTrash size={14} />
+                  {deletingNotebookId === nb.id ? (
+                    <IconLoader size={14} className="spin" />
+                  ) : (
+                    <IconTrash size={14} />
+                  )}
                 </button>
               </div>
 

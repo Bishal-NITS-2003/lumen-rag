@@ -12,9 +12,21 @@ import AddSourceModal from './components/AddSourceModal';
 import SourceViewerModal from './components/SourceViewerModal';
 
 export default function App() {
-  const [view, setView] = useState('dashboard'); // 'dashboard' | 'notebook'
+  // Parse current route from URL (hash or pathname)
+  const getRouteNotebookId = () => {
+    try {
+      const hashMatch = window.location.hash.match(/^#\/notebook\/([a-zA-Z0-9_-]+)/);
+      if (hashMatch) return hashMatch[1];
+      const pathMatch = window.location.pathname.match(/^\/notebook\/([a-zA-Z0-9_-]+)/);
+      if (pathMatch) return pathMatch[1];
+    } catch {}
+    return null;
+  };
+
+  const initialNbId = getRouteNotebookId();
+  const [view, setView] = useState(initialNbId ? 'notebook' : 'dashboard');
   const [notebooks, setNotebooks] = useState([]);
-  const [currentNotebookId, setCurrentNotebookId] = useState(null);
+  const [currentNotebookId, setCurrentNotebookId] = useState(initialNbId);
   const [currentNotebook, setCurrentNotebook] = useState(null);
 
   // User Auth State
@@ -22,7 +34,11 @@ export default function App() {
   const [authLoading, setAuthLoading] = useState(true);
 
   const [systemHealth, setSystemHealth] = useState(null);
+  const [isLoadingNotebooks, setIsLoadingNotebooks] = useState(true);
+  const [isLoadingDetail, setIsLoadingDetail] = useState(false);
   const [isLoadingChat, setIsLoadingChat] = useState(false);
+  const [deletingNotebookId, setDeletingNotebookId] = useState(null);
+  const [deletingSourceId, setDeletingSourceId] = useState(null);
 
   // Modals
   const [isAddSourceOpen, setIsAddSourceOpen] = useState(false);
@@ -58,9 +74,39 @@ export default function App() {
       fetchNotebooks(user.uid);
     } else {
       setNotebooks([]);
+      setIsLoadingNotebooks(false);
     }
     fetchHealth();
   }, [user]);
+
+  // Sync route on popstate and hashchange (browser forward/back & page refresh)
+  useEffect(() => {
+    const handleRouteSync = () => {
+      const nbId = getRouteNotebookId();
+      if (nbId) {
+        setCurrentNotebookId(nbId);
+        setView('notebook');
+        loadNotebookDetail(nbId);
+      } else {
+        setCurrentNotebookId(null);
+        setView('dashboard');
+        setCurrentNotebook(null);
+      }
+    };
+
+    window.addEventListener('popstate', handleRouteSync);
+    window.addEventListener('hashchange', handleRouteSync);
+
+    const initialId = getRouteNotebookId();
+    if (initialId) {
+      loadNotebookDetail(initialId);
+    }
+
+    return () => {
+      window.removeEventListener('popstate', handleRouteSync);
+      window.removeEventListener('hashchange', handleRouteSync);
+    };
+  }, []);
 
   const fetchHealth = async () => {
     try {
@@ -72,8 +118,10 @@ export default function App() {
   const fetchNotebooks = async (userId = user?.uid) => {
     if (!userId) {
       setNotebooks([]);
+      setIsLoadingNotebooks(false);
       return;
     }
+    setIsLoadingNotebooks(true);
     try {
       const headers = { 'X-User-Id': userId };
       const res = await fetch('/api/notebooks', { headers });
@@ -85,26 +133,43 @@ export default function App() {
       }
     } catch {
       setNotebooks([]);
+    } finally {
+      setIsLoadingNotebooks(false);
     }
   };
 
-  const loadNotebookDetail = async (id) => {
+  const loadNotebookDetail = async (id, currentUser = user) => {
+    if (!id) return;
+    setIsLoadingDetail(true);
     try {
       const headers = {};
-      if (user?.uid) headers['X-User-Id'] = user.uid;
+      if (currentUser?.uid) headers['X-User-Id'] = currentUser.uid;
       const res = await fetch(`/api/notebooks/${id}`, { headers });
       if (res.ok) {
         const data = await res.json();
         setCurrentNotebook(data);
         setEditableTitle(data.title);
       }
-    } catch {}
+    } catch (err) {
+      console.error('Failed to load notebook detail:', err);
+    } finally {
+      setIsLoadingDetail(false);
+    }
   };
 
   const handleSelectNotebook = (id) => {
     setCurrentNotebookId(id);
     setView('notebook');
+    window.history.pushState({}, '', `#/notebook/${id}`);
     loadNotebookDetail(id);
+  };
+
+  const handleBackToDashboard = () => {
+    setView('dashboard');
+    setCurrentNotebookId(null);
+    setCurrentNotebook(null);
+    window.history.pushState({}, '', '#/');
+    fetchNotebooks();
   };
 
   const handleGoogleSignIn = async () => {
@@ -158,15 +223,7 @@ export default function App() {
   };
 
   const handleDeleteNotebook = async (id) => {
-    // Optimistically remove from state immediately for instant feedback
-    const previous = [...notebooks];
-    setNotebooks(prev => prev.filter(n => n.id !== id));
-    if (currentNotebookId === id) {
-      setView('dashboard');
-      setCurrentNotebook(null);
-      setCurrentNotebookId(null);
-    }
-
+    setDeletingNotebookId(id);
     try {
       const headers = {};
       if (user?.uid) headers['X-User-Id'] = user.uid;
@@ -178,11 +235,15 @@ export default function App() {
         const errData = await res.json().catch(() => ({}));
         throw new Error(errData.detail || 'Failed to delete notebook');
       }
+      setNotebooks(prev => prev.filter(n => n.id !== id));
+      if (currentNotebookId === id) {
+        handleBackToDashboard();
+      }
     } catch (err) {
       console.error('Failed to delete notebook:', err);
-      // Revert if backend error
-      setNotebooks(previous);
       alert(`Could not delete notebook: ${err.message}`);
+    } finally {
+      setDeletingNotebookId(null);
     }
   };
 
@@ -235,6 +296,7 @@ export default function App() {
   };
 
   const handleDeleteSource = async (sourceId) => {
+    setDeletingSourceId(sourceId);
     try {
       const res = await fetch(`/api/notebooks/${currentNotebookId}/sources/${sourceId}`, { method: 'DELETE' });
       if (res.ok) {
@@ -249,6 +311,8 @@ export default function App() {
       }
     } catch (err) {
       alert(`Network error deleting source: ${err.message}`);
+    } finally {
+      setDeletingSourceId(null);
     }
   };
 
@@ -331,9 +395,26 @@ export default function App() {
     } catch {}
   };
 
-  // ── Append user selection / message to Manual Notes ────────
+  // ── Append user selection / message to Manual Notes (Optimistic immediate update) ────────
   const handleAddToNote = async (textToAdd) => {
     if (!textToAdd || !textToAdd.trim()) return;
+    const trimmed = textToAdd.trim();
+
+    // 1. Optimistic immediate frontend update so user sees it without waiting
+    const currentContent = currentNotebook?.manual_note?.content || '';
+    const updatedContent = currentContent.trim() ? `${currentContent.trim()}\n\n${trimmed}` : trimmed;
+
+    setCurrentNotebook(prev => ({
+      ...prev,
+      manual_note: {
+        ...(prev?.manual_note || {}),
+        notebook_id: currentNotebookId,
+        content: updatedContent,
+        updated_at: new Date().toISOString()
+      }
+    }));
+
+    // 2. Persist to DB in background
     try {
       const res = await fetch(`/api/notebooks/${currentNotebookId}/note/append`, {
         method: 'POST',
@@ -341,7 +422,7 @@ export default function App() {
           'Content-Type': 'application/json',
           ...(user?.uid ? { 'X-User-Id': user.uid } : {})
         },
-        body: JSON.stringify({ text: textToAdd.trim() })
+        body: JSON.stringify({ text: trimmed })
       });
       if (res.ok) {
         const updatedNote = await res.json();
@@ -361,7 +442,7 @@ export default function App() {
       <header className="app-top-header">
         <div className="header-left-col">
           {view === 'notebook' ? (
-            <button className="back-to-dashboard-btn" onClick={() => { setView('dashboard'); fetchNotebooks(); }}>
+            <button className="back-to-dashboard-btn" onClick={handleBackToDashboard}>
               <IconArrowLeft size={16} />
               <span>Notebooks</span>
             </button>
@@ -443,6 +524,8 @@ export default function App() {
       {view === 'dashboard' ? (
         <NotebooksDashboard
           notebooks={notebooks}
+          isLoading={isLoadingNotebooks}
+          deletingNotebookId={deletingNotebookId}
           user={user}
           onGoogleSignIn={handleGoogleSignIn}
           onCreateNotebook={handleCreateNotebook}
@@ -455,6 +538,8 @@ export default function App() {
           {/* Column 1: Sources with View eye icon & extraction error badge */}
           <SourcesPanel
             sources={currentNotebook?.sources || []}
+            isLoading={isLoadingDetail}
+            deletingSourceId={deletingSourceId}
             onOpenAddModal={() => setIsAddSourceOpen(true)}
             onToggleSource={handleToggleSource}
             onDeleteSource={handleDeleteSource}
