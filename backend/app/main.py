@@ -3,12 +3,12 @@ import json
 import logging
 import asyncio
 from typing import List, Optional
-from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, Header, status
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, Header, status, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
 from .config import settings
-from .database import get_db, init_db
+from .database import get_db, init_db, SessionLocal
 from .models import Notebook, Source, ChatMessage, DocumentChunk, NotebookNote
 from .schemas import (
     NotebookCreate, NotebookUpdate, NotebookResponse, NotebookDetailResponse,
@@ -291,15 +291,31 @@ def append_to_notebook_note(notebook_id: str, payload: NoteAppendRequest, db: Se
 
 MAX_SOURCES_PER_NOTEBOOK = 5
 
+def background_index_source(notebook_id: str, source_id: str, title: str, content: str):
+    """
+    Indexes document chunks into ChromaDB & DB in a background worker thread.
+    This ensures CPU-heavy embedding calculation NEVER blocks the FastAPI asyncio event loop,
+    so other users, health checks, and uploads remain blazing fast with 0 freezing.
+    """
+    db = SessionLocal()
+    try:
+        index_source(db, notebook_id, source_id, title, content)
+    except Exception as e:
+        logger.error(f"Background indexing failed for source '{title}' ({source_id}): {e}")
+    finally:
+        db.close()
+
+
 # ─── Sources Management ───────────────────────────────────────
 @app.post("/api/notebooks/{notebook_id}/sources/upload-batch", response_model=List[SourceResponse])
 @app.post("/api/notebooks/{notebook_id}/sources/upload-batch/", response_model=List[SourceResponse])
 async def upload_files_batch(
     notebook_id: str,
+    background_tasks: BackgroundTasks,
     files: List[UploadFile] = File(...),
     db: Session = Depends(get_db)
 ):
-    """Uploads up to 5 documents (PDF, TXT, MD, images) in a single batch, indexes each, and saves to S3/local."""
+    """Uploads up to 5 documents (PDF, TXT, MD, images) in a single batch, indexes each in background, and saves to S3/local."""
     nb = db.query(Notebook).filter(Notebook.id == notebook_id).first()
     if not nb:
         raise HTTPException(status_code=404, detail="Notebook not found")
@@ -343,7 +359,8 @@ async def upload_files_batch(
             db.commit()
             db.refresh(source)
 
-            index_source(db, notebook_id, source.id, source.title, text_content)
+            # Offload heavy embedding to background worker thread so the event loop never blocks
+            background_tasks.add_task(background_index_source, notebook_id, source.id, source.title, text_content)
             results.append(source)
         except Exception as e:
             logger.error(f"Error processing batch upload file {f.filename}: {e}")
@@ -358,10 +375,11 @@ async def upload_files_batch(
 @app.post("/api/notebooks/{notebook_id}/sources/upload", response_model=SourceResponse)
 async def upload_file_source(
     notebook_id: str,
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     db: Session = Depends(get_db)
 ):
-    """Uploads a PDF, TXT, or MD document into the notebook, saves to AWS S3/local, and indexes."""
+    """Uploads a PDF, TXT, or MD document into the notebook, saves to AWS S3/local, and indexes in background."""
     nb = db.query(Notebook).filter(Notebook.id == notebook_id).first()
     if not nb:
         raise HTTPException(status_code=404, detail="Notebook not found")
@@ -406,8 +424,8 @@ async def upload_file_source(
     db.commit()
     db.refresh(source)
 
-    # 5. Index into Chroma Vector Store and DocumentChunks table
-    index_source(db, notebook_id, source.id, source.title, text_content)
+    # 5. Index into Chroma Vector Store in background so request returns instantly
+    background_tasks.add_task(background_index_source, notebook_id, source.id, source.title, text_content)
 
     return source
 
@@ -416,6 +434,7 @@ async def upload_file_source(
 async def add_url_source(
     notebook_id: str,
     payload: AddUrlSourceRequest,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db)
 ):
     """Fetches YouTube transcript or Web article from a URL and adds as a source."""
@@ -461,7 +480,7 @@ async def add_url_source(
     db.refresh(source)
 
     if extract_status != "failed":
-        index_source(db, notebook_id, source.id, source.title, content)
+        background_tasks.add_task(background_index_source, notebook_id, source.id, source.title, content)
 
     return source
 
@@ -496,6 +515,7 @@ async def generate_candidate_sources(
 async def add_candidate_sources(
     notebook_id: str,
     payload: AddSelectedSourcesRequest,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db)
 ):
     """
@@ -558,7 +578,7 @@ async def add_candidate_sources(
         db.refresh(source)
 
         if extract_status != "failed":
-            index_source(db, notebook_id, source.id, source.title, content)
+            background_tasks.add_task(background_index_source, notebook_id, source.id, source.title, content)
 
         added_sources.append(source)
 
