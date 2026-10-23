@@ -165,7 +165,6 @@ def get_notebook_detail(notebook_id: str, db: Session = Depends(get_db)):
         sources=nb.sources,
         messages=messages_data,
         manual_note=manual_note,
-        notes=nb.notes,
         created_at=nb.created_at,
         updated_at=nb.updated_at
     )
