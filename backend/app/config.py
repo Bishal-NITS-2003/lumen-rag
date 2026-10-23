@@ -16,7 +16,11 @@ class Settings(BaseSettings):
     GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "").strip()
     GROQ_MODEL: str = os.getenv("GROQ_MODEL", "qwen/qwen3.8-27b").strip()
 
-    # Local Vector Embeddings (MiniLM - lightweight CPU sentence embeddings with 0 external API calls)
+    # Google Cloud AI (High-speed sub-second Vector Embeddings via text-embedding-004)
+    GOOGLE_API_KEY: str = os.getenv("GOOGLE_API_KEY", "").strip()
+    GEMINI_EMBEDDING_MODEL: str = os.getenv("GEMINI_EMBEDDING_MODEL", "models/text-embedding-004").strip()
+
+    # Fallback Local Vector Embeddings (MiniLM - lightweight offline backup)
     HF_EMBEDDING_MODEL: str = os.getenv("HF_EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2").strip()
     
     # Search API (SerpAPI for Google discovery of articles and YouTube metadata)
