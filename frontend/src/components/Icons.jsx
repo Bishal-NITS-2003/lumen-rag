@@ -33,7 +33,11 @@ import {
   AlertTriangle as IconAlertTriangle,
   LogOut as IconLogOut,
   User as IconUser,
-  Lock as IconLock
+  Lock as IconLock,
+  UploadCloud as IconUploadCloud,
+  FileUp as IconFileUp,
+  File as IconFile,
+  CheckCircle2 as IconCheckCircle
 } from 'lucide-react';
 
 export {
@@ -70,7 +74,11 @@ export {
   IconAlertTriangle,
   IconLogOut,
   IconUser,
-  IconLock
+  IconLock,
+  IconUploadCloud,
+  IconFileUp,
+  IconFile,
+  IconCheckCircle
 };
 
 export const IconYoutube = ({ size = 16, style, color = 'currentColor' } = {}) => (

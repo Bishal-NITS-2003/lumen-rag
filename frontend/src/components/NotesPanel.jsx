@@ -94,7 +94,7 @@ export default function NotesPanel({
   // Clear note
   const handleClearNote = () => {
     if (!content.trim()) return;
-    if (window.confirm('Are you sure you want to clear your manual notes for this notebook?')) {
+    if (window.confirm('Clear all notes for this notebook? This cannot be undone.')) {
       setContent('');
       saveNoteToDb('');
     }
@@ -108,7 +108,7 @@ export default function NotesPanel({
       <div className="panel-header notes-panel-header">
         <div className="panel-title-group">
           <h2 className="panel-heading">
-            <IconFileText size={18} /> Research Notes
+            <IconFileText size={18} />Notes
           </h2>
           <span className="save-status-indicator">
             {saveStatus === 'saving' && (
@@ -118,7 +118,7 @@ export default function NotesPanel({
             )}
             {saveStatus === 'saved' && (
               <span className="status-saved">
-                <IconCheck size={12} /> Saved in DB
+                <IconCheck size={12} /> Saved
               </span>
             )}
             {saveStatus === 'unsaved' && (
@@ -152,7 +152,7 @@ export default function NotesPanel({
       </div>
 
       <div className="notes-sub-banner">
-        <span>💡 Highlight any text in Chat and click <b>➕ Add to Note</b> to append it automatically.</span>
+        <span>Highlight any text in Chat and click <b>Save to Notes</b> to add it here instantly.</span>
       </div>
 
       <div className="notes-editor-container">

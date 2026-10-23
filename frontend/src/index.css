@@ -273,7 +273,6 @@ body {
   display: flex;
   align-items: flex-start;
   gap: 16px;
-  margin-bottom: 20px;
 }
 
 .hero-title {
@@ -471,7 +470,7 @@ body {
 
 /* ─── Column 1: Sources Panel ──────────────────────────────────────── */
 .sources-panel {
-  width: 320px;
+  width: 300px;
   background: var(--bg-panel);
   border-right: 1px solid var(--border);
   display: flex;
@@ -492,6 +491,7 @@ body {
 
 .panel-title-group {
   display: flex;
+  justify-content: center;
   align-items: center;
   gap: 8px;
 }
@@ -499,6 +499,10 @@ body {
 .panel-heading {
   font-size: 15px;
   font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
 }
 
 .panel-count-pill {
@@ -2236,10 +2240,12 @@ body {
 .notes-panel {
   display: flex;
   flex-direction: column;
-  background: var(--bg-surface);
+  width: 320px;
+  background: var(--bg-panel);
   border-left: 1px solid var(--border);
   height: 100%;
   overflow: hidden;
+  flex-shrink: 0;
 }
 
 .notes-panel-header {
@@ -2938,70 +2944,312 @@ body {
 }
 
 /* ─────────────────────────────────────────────────────────── */
-/* ── Batch Multi-File Upload Styles ───────────────────────── */
+/* ── Redesigned Add Sources Modal & Upload Dropzone ───────── */
 /* ─────────────────────────────────────────────────────────── */
-.batch-selected-files-container {
-  background: var(--bg-subtle);
+.add-source-modal-redesigned {
+  max-width: 620px;
+  border-radius: var(--r-lg);
+  overflow: hidden;
+  box-shadow: 0 20px 40px -12px rgba(0, 0, 0, 0.35);
   border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  padding: 16px;
-  margin-bottom: 12px;
 }
 
-.batch-files-header {
+.modal-quota-indicator {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.quota-text {
+  font-size: 12px;
+  color: var(--text-3);
+  font-weight: 500;
+}
+
+.quota-bar-pills {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.quota-pill-dot {
+  width: 14px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--border-2);
+  transition: all var(--transition);
+}
+
+.quota-pill-dot.filled {
+  background: var(--primary);
+}
+
+.quota-pill-dot.staged {
+  background: #f59e0b;
+}
+
+.quota-pill-dot.empty {
+  background: var(--border);
+}
+
+.modal-tabs-segmented {
+  display: flex;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 4px;
+  gap: 4px;
+  margin: 12px 20px 0;
+}
+
+.tab-segment-btn {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-2);
+  background: transparent;
+  border: none;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition: all var(--transition);
+  outline: none;
+}
+
+.tab-segment-btn:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
+.tab-segment-btn.active {
+  color: var(--text);
+  font-weight: 600;
+  background: var(--bg-panel);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.modal-body-custom {
+  padding: 16px 20px 20px;
+  overflow-y: auto;
+  flex: 1;
+  max-height: calc(85vh - 140px);
+}
+
+/* ─── Premium Dropzone ────────────────────────────────────────────── */
+.premium-dropzone {
+  border: 2px dashed var(--border-2);
+  border-radius: var(--r-lg);
+  background: var(--bg-subtle);
+  padding: 34px 20px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  user-select: none;
+}
+
+.premium-dropzone:hover {
+  border-color: var(--primary);
+  background: rgba(79, 70, 229, 0.03);
+  transform: translateY(-1px);
+}
+
+.premium-dropzone.is-dragging {
+  border-color: var(--primary);
+  background: rgba(79, 70, 229, 0.08);
+  box-shadow: 0 0 0 4px rgba(79, 70, 229, 0.15);
+  transform: scale(1.01);
+}
+
+.premium-dropzone.disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.dropzone-icon-bubble {
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, rgba(79, 70, 229, 0.12) 0%, rgba(124, 58, 237, 0.12) 100%);
+  color: var(--primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 12px;
+  transition: transform 0.2s ease;
+}
+
+.premium-dropzone:hover .dropzone-icon-bubble {
+  transform: scale(1.08);
+}
+
+.dropzone-heading {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+
+.dropzone-description {
+  font-size: 13px;
+  color: var(--text-2);
+  margin-bottom: 14px;
+}
+
+.dropzone-badges-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.file-format-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  color: var(--text-2);
+}
+
+.dropzone-capacity-hint {
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+
+/* ─── Selected Files Deck ─────────────────────────────────────────── */
+.selected-files-deck {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.deck-summary-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 12px;
+  padding: 2px 2px 8px;
+  border-bottom: 1px solid var(--border);
 }
 
-.batch-count-title {
-  font-size: 13px;
+.deck-summary-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.deck-summary-title {
+  font-size: 13.5px;
   font-weight: 600;
   color: var(--text);
 }
 
-.btn-add-more-files {
-  background: none;
-  border: 1px dashed var(--primary);
+.deck-summary-size {
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+.deck-summary-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.btn-add-more-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: rgba(79, 70, 229, 0.08);
   color: var(--primary);
-  border-radius: 6px;
+  border: 1px dashed rgba(79, 70, 229, 0.4);
   padding: 4px 10px;
+  border-radius: 999px;
   font-size: 11.5px;
-  font-weight: 500;
+  font-weight: 600;
   cursor: pointer;
   transition: all var(--transition);
 }
 
-.btn-add-more-files:hover {
-  background: rgba(79, 70, 229, 0.08);
+.btn-add-more-pill:hover {
+  background: rgba(79, 70, 229, 0.16);
 }
 
-.batch-files-list {
+.btn-clear-all {
+  background: none;
+  border: none;
+  color: var(--text-3);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: all var(--transition);
+}
+
+.btn-clear-all:hover {
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.08);
+}
+
+.mini-drop-strip {
+  border: 1.5px dashed var(--border-2);
+  border-radius: var(--r-md);
+  padding: 8px 12px;
+  text-align: center;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background: var(--bg-subtle);
+  transition: all var(--transition);
+}
+
+.mini-drop-strip:hover,
+.mini-drop-strip.is-dragging {
+  border-color: var(--primary);
+  background: rgba(79, 70, 229, 0.04);
+  color: var(--primary);
+}
+
+.staged-files-list {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  max-height: 220px;
+  max-height: 240px;
   overflow-y: auto;
-  padding-right: 4px;
+  padding-right: 2px;
 }
 
-.batch-file-item {
+.staged-file-card {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  padding: 9px 12px;
   background: var(--bg-panel);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 8px 12px;
-  transition: border-color var(--transition);
+  border-radius: var(--r-md);
+  transition: border-color var(--transition), box-shadow var(--transition);
 }
 
-.batch-file-item:hover {
-  border-color: var(--primary);
+.staged-file-card:hover {
+  border-color: var(--border-2);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.04);
 }
 
-.batch-file-left {
+.staged-file-left {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -3009,56 +3257,126 @@ body {
   flex: 1;
 }
 
-.batch-file-icon {
-  color: var(--primary);
+.staged-file-badge {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  padding: 2px 6px;
+  border-radius: 4px;
   flex-shrink: 0;
 }
 
-.batch-file-info {
+.staged-file-meta {
   display: flex;
   flex-direction: column;
   min-width: 0;
 }
 
-.batch-file-name {
-  font-size: 12.5px;
+.staged-file-name {
+  font-size: 13px;
   font-weight: 500;
   color: var(--text);
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-.batch-file-size {
+.staged-file-sub {
   font-size: 11px;
   color: var(--text-3);
   margin-top: 1px;
 }
 
-.btn-remove-batch-file {
-  background: none;
-  border: none;
-  color: var(--text-3);
-  cursor: pointer;
-  padding: 4px 6px;
-  border-radius: 4px;
-  font-size: 13px;
-  transition: all var(--transition);
+.staged-file-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   flex-shrink: 0;
 }
 
-.btn-remove-batch-file:hover {
+.file-ready-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #16a34a;
+  background: #dcfce7;
+  padding: 2px 7px;
+  border-radius: 999px;
+}
+
+[data-theme='dark'] .file-ready-tag {
+  background: rgba(22, 163, 74, 0.2);
+  color: #4ade80;
+}
+
+.btn-remove-staged {
+  background: transparent;
+  border: none;
+  color: var(--text-3);
+  cursor: pointer;
+  padding: 5px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--transition);
+}
+
+.btn-remove-staged:hover {
   color: #ef4444;
   background: rgba(239, 68, 68, 0.1);
 }
 
-.batch-ocr-hint {
-  font-size: 11.5px;
-  color: var(--text-3);
-  margin-top: 10px;
+.deck-helper-note {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-2);
+  background: rgba(79, 70, 229, 0.05);
+  border: 1px solid rgba(79, 70, 229, 0.15);
+  padding: 9px 12px;
+  border-radius: var(--r-md);
+  margin-top: 2px;
+}
+
+.sparkle-hint {
+  color: var(--primary);
+  flex-shrink: 0;
+}
+
+.modal-footer-custom {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+/* ─── Search & Link Inputs with Icons ─────────────────────────────── */
+.search-input-wrapper,
+.link-input-wrapper {
+  position: relative;
+  flex: 1;
+  display: flex;
+  align-items: center;
+}
+
+.search-input-icon,
+.link-input-icon {
+  position: absolute;
+  left: 12px;
+  color: var(--text-3);
+  pointer-events: none;
+}
+
+.search-input-styled,
+.link-input-styled {
+  padding-left: 36px !important;
 }
 
 /* ─────────────────────────────────────────────────────────── */
@@ -3180,4 +3498,358 @@ body {
   opacity: 0.6;
   cursor: not-allowed;
   pointer-events: none;
+}
+
+/* ─────────────────────────────────────────────────────────── */
+/* ── Hero Icon Wrap ────────────────────────────────────────── */
+/* ─────────────────────────────────────────────────────────── */
+.hero-icon-wrap {
+  width: 52px;
+  height: 52px;
+  border-radius: var(--r-lg);
+  background: linear-gradient(135deg, var(--primary-light) 0%, rgba(168, 85, 247, 0.1) 100%);
+  color: var(--primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border: 1px solid rgba(99, 102, 241, 0.2);
+}
+
+/* ─────────────────────────────────────────────────────────── */
+/* ── Icon-btn Danger Variant ───────────────────────────────── */
+/* ─────────────────────────────────────────────────────────── */
+.icon-btn-danger {
+  background: none;
+  border: none;
+  color: var(--text-3);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: var(--r-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--transition);
+}
+
+.icon-btn-danger:hover {
+  color: var(--red);
+  background: var(--red-light);
+}
+
+/* ─────────────────────────────────────────────────────────── */
+/* ── Loading Bubble  ───────────────────────────────────────── */
+/* ─────────────────────────────────────────────────────────── */
+.loading-bubble {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  border-bottom-left-radius: 4px;
+}
+
+.loading-text {
+  font-size: 13px;
+  color: var(--text-3);
+  font-style: italic;
+}
+
+/* ─────────────────────────────────────────────────────────── */
+/* ── Mobile Responsive Layout ──────────────────────────────── */
+/* ─────────────────────────────────────────────────────────── */
+
+/* Tablet: hide notes panel, shrink sources */
+@media (max-width: 1024px) {
+  .notebook-workspace-3col {
+    /* Notes panel hidden on tablet — accessed via chat "Save" button */
+  }
+
+  .notes-panel {
+    display: none;
+  }
+
+  .sources-panel {
+    width: 260px;
+  }
+
+  .dashboard-container {
+    padding: 24px 24px;
+  }
+
+  .header-user-name {
+    display: none;
+  }
+}
+
+/* Mobile: full-screen single panel layout */
+@media (max-width: 768px) {
+  body {
+    overflow: auto;
+  }
+
+  .app-shell {
+    height: auto;
+    min-height: 100vh;
+    overflow: auto;
+  }
+
+  .app-top-header {
+    padding: 0 14px;
+    height: 52px;
+  }
+
+  .logo-brand-text {
+    font-size: 17px;
+  }
+
+  .header-right-col {
+    gap: 8px;
+  }
+
+  .header-google-signin-btn span {
+    display: none; /* show only icon on mobile */
+  }
+
+  /* Dashboard */
+  .dashboard-container {
+    padding: 16px;
+  }
+
+  .dashboard-hero {
+    padding: 20px;
+    margin-bottom: 20px;
+  }
+
+  .hero-branding {
+    gap: 12px;
+    margin-bottom: 0;
+  }
+
+  .hero-icon-wrap {
+    width: 40px;
+    height: 40px;
+  }
+
+  .hero-title {
+    font-size: 20px;
+  }
+
+  .hero-sub {
+    font-size: 13px;
+  }
+
+  .dashboard-action-bar {
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 16px;
+  }
+
+  .notebooks-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .notebook-card {
+    min-height: 130px;
+    padding: 16px;
+  }
+
+  /* Notebook workspace: stack panels vertically via tabs */
+  .notebook-workspace-3col {
+    flex-direction: column;
+    height: auto;
+    overflow: auto;
+    min-height: calc(100vh - 52px);
+  }
+
+  .sources-panel {
+    width: 100%;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+    height: auto;
+    max-height: 280px;
+  }
+
+  .chat-panel {
+    height: auto;
+    min-height: 60vh;
+    flex: none;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .notes-panel {
+    display: flex;
+    width: 100%;
+    height: auto;
+    min-height: 280px;
+    border-left: none;
+    border-top: 1px solid var(--border);
+  }
+
+  .notes-editor-container {
+    min-height: 200px;
+  }
+
+  .notes-textarea {
+    min-height: 180px;
+  }
+
+  .chat-messages-container {
+    padding: 16px;
+  }
+
+  .chat-welcome-state {
+    padding: 20px 0;
+    min-height: 50%;
+  }
+
+  .welcome-heading {
+    font-size: 18px;
+  }
+
+  .starter-chips-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .chat-input-bar-wrap {
+    padding: 12px 14px;
+    position: sticky;
+    bottom: 0;
+    z-index: 10;
+  }
+
+  .message-bubble {
+    max-width: 100%;
+  }
+
+  .messages-stream {
+    gap: 12px;
+  }
+
+  /* Sources panel mobile tweaks */
+  .sources-scroll-list {
+    padding: 8px;
+  }
+
+  .panel-header {
+    padding: 0 12px;
+  }
+
+  /* Modal full-screen on mobile */
+  .modal-backdrop {
+    padding: 0;
+    align-items: flex-end;
+  }
+
+  .modal-content {
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+    max-height: 92vh;
+    border-radius: var(--r-xl) var(--r-xl) 0 0;
+  }
+
+  .modal-tabs-segmented {
+    margin: 8px 12px 0;
+    padding: 3px;
+  }
+
+  .tab-segment-btn {
+    font-size: 11.5px;
+    padding: 6px 8px;
+    gap: 5px;
+  }
+
+  .modal-body-custom {
+    padding: 12px 14px 16px;
+  }
+
+  .premium-dropzone {
+    padding: 24px 12px;
+  }
+
+  .dropzone-icon-bubble {
+    width: 48px;
+    height: 48px;
+    margin-bottom: 8px;
+  }
+
+  .dropzone-heading {
+    font-size: 13.5px;
+  }
+
+  .dropzone-description {
+    font-size: 12px;
+    margin-bottom: 10px;
+  }
+
+  .staged-file-card {
+    padding: 8px 10px;
+  }
+
+  .staged-file-name {
+    font-size: 12px;
+  }
+
+  /* Active notebook title — shorter on mobile */
+  .active-notebook-title {
+    font-size: 14px;
+    max-width: 160px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .notebook-title-editor-wrap {
+    max-width: 180px;
+  }
+
+  /* Chat login gate — stack on mobile */
+  .chat-login-gate-banner {
+    flex-direction: column;
+    gap: 12px;
+    text-align: center;
+  }
+
+  .login-gate-info {
+    flex-direction: column;
+    text-align: center;
+    gap: 8px;
+  }
+
+  .btn-login-gate-google {
+    width: 100%;
+    justify-content: center;
+  }
+
+  /* Rate limit banner */
+  .chat-rate-limit-banner {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  /* Model selector */
+  .chat-input-toolbar {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  /* Source viewer modal */
+  .source-detail-modal {
+    height: 90vh;
+  }
+}
+
+/* Very small phones */
+@media (max-width: 400px) {
+  .btn-primary span, .btn-google-action span {
+    display: none;
+  }
+
+  .back-to-dashboard-btn span {
+    display: none;
+  }
 }

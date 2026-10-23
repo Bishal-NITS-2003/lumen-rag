@@ -24,7 +24,7 @@ export default function SourcesPanel({
 
   const handleDelete = (e, src) => {
     e.stopPropagation();
-    if (window.confirm(`Delete "${src.title}" from this notebook and database?`)) {
+    if (window.confirm(`Remove "${src.title}" from this notebook?`)) {
       onDeleteSource(src.id);
     }
   };
@@ -71,7 +71,7 @@ export default function SourcesPanel({
             </div>
             <div className="empty-sources-title">No sources added yet</div>
             <p className="empty-sources-sub">
-              Upload PDFs, paste web/YouTube links, or discover live Google sources by topic to start your research (up to 5 sources).
+              Upload PDFs, paste a YouTube or article link, or discover sources by topic. Up to 5 sources per notebook.
             </p>
             <button className="btn-primary" onClick={onOpenAddModal}>
               <IconPlus size={16} /> Add First Source

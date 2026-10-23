@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
-  IconLumen, IconArrowLeft, IconSun, IconMoon, IconSparkles,
-  IconEdit, IconDatabase, IconFileText, IconGoogle, IconLogOut, IconUser
+  IconLumen, IconArrowLeft, IconSun, IconMoon,
+  IconEdit, IconGoogle, IconLogOut
 } from './components/Icons';
 import { signInWithGoogle, logOut, subscribeToAuth } from './firebase';
 import NotebooksDashboard from './components/NotebooksDashboard';
@@ -449,7 +449,7 @@ export default function App() {
           ) : (
             <div className="logo-brand-wrap">
               <IconLumen size={26} />
-              <span className="logo-brand-text">Lumen</span>
+              <span className="logo-brand-text">Lumen Notebook</span>
             </div>
           )}
 
@@ -476,16 +476,6 @@ export default function App() {
         </div>
 
         <div className="header-right-col">
-          <div className="status-badge model-badge">
-            <IconSparkles size={13} />
-            <span>{systemHealth?.llm_engine || 'Groq Cloud'}</span>
-          </div>
-
-          <div className="status-badge db-badge">
-            <IconDatabase size={13} />
-            <span>{systemHealth?.database || 'Database'}</span>
-          </div>
-
           <button
             className="theme-toggle-btn"
             onClick={() => setDarkMode(!darkMode)}
@@ -531,7 +521,6 @@ export default function App() {
           onCreateNotebook={handleCreateNotebook}
           onSelectNotebook={handleSelectNotebook}
           onDeleteNotebook={handleDeleteNotebook}
-          systemHealth={systemHealth}
         />
       ) : (
         <div className="notebook-workspace-3col">

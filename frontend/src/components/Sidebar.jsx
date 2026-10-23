@@ -38,7 +38,7 @@ export default function Sidebar({
             <IconLumen size={32} />
             <div>
               <div style={{ fontSize: '15px', fontWeight: 800, color: 'var(--text)', letterSpacing: '-0.4px' }}>
-                Lumen
+                Lumen Notebook
               </div>
               <div style={{ fontSize: '10px', color: 'var(--text-3)', fontWeight: 500, letterSpacing: '0.3px' }}>
                 AI Research Assistant

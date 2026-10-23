@@ -172,7 +172,7 @@ export default function SourceViewerModal({
             )}
           </div>
 
-          <div className="modal-header-actions">
+          <div className="modal-header-actions" style={{ display: "flex", flexDirection: "row", gap: 5 }}>
             {sourceDetail?.content && (
               <>
                 <button className="btn-secondary btn-sm" onClick={handleCopy} title="Copy source text">
@@ -211,7 +211,7 @@ export default function SourceViewerModal({
 
               {sourceDetail.summary && !isFailed && (
                 <div className="source-summary-callout">
-                  <div className="summary-callout-title">AI Source Summary</div>
+                  <div className="summary-callout-title">Overview</div>
                   <p className="summary-callout-text">{sourceDetail.summary}</p>
                 </div>
               )}

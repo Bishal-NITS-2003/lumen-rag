@@ -14,7 +14,7 @@ marked.setOptions({
 
 export const AVAILABLE_MODELS = [
   { id: 'openai/gpt-oss-120b', label: 'GPT OSS 120B' },
-  { id: 'qwen/qwen3.8-27b', label: 'Qwen 3.8 27B' },
+  { id: 'qwen/qwen3.8-27b', label: 'Qwen 27B' },
   { id: 'openai/gpt-oss-20b', label: 'GPT OSS 20B' },
   { id: 'openai/gpt-oss-safeguard-20b', label: 'GPT Safeguard 20B' },
   { id: 'meta-llama/llama-prompt-guard-2-86m', label: 'Llama Guard 86M' },
@@ -85,7 +85,7 @@ export default function ChatPanel({
     if (!selectionPopup?.text) return;
     if (onAddToNote) {
       onAddToNote(selectionPopup.text);
-      showToast('Appended selection to Research Notes!');
+      showToast('Added to your notes');
     }
     window.getSelection()?.removeAllRanges();
     setSelectionPopup(null);
@@ -120,10 +120,10 @@ export default function ChatPanel({
         const curLabel = getModelLabel(selectedModel);
         setRateLimitError({
           failedModel: curLabel,
-          message: `Rate limit reached for ${curLabel}. Please switch to another model from the dropdown and try again.`
+          message: `Rate limit reached for ${curLabel}. Please switch to another model and try again.`
         });
       } else {
-        alert(`Chat query failed: ${err.message || 'Unknown error'}`);
+        alert(`Something went wrong: ${err.message || 'Unknown error'}`);
       }
     }
   };
@@ -142,10 +142,10 @@ export default function ChatPanel({
   };
 
   const starterPrompts = [
-    "Summarize the key ideas and conclusions across all sources",
-    "What are the most significant findings and data points?",
-    "Identify any conflicting perspectives or contrasting claims",
-    "Generate a structured 5-point executive summary"
+    'Summarize the key ideas across all sources',
+    'What are the most important findings?',
+    'Identify any conflicting perspectives',
+    'Write a 5-point executive summary'
   ];
 
   // Helper to render text with marked Markdown parsing & clickable citation pills
@@ -230,7 +230,7 @@ export default function ChatPanel({
           }}
         >
           <button className="btn-add-to-note-float">
-            <IconPlus size={13} /> Add to Note
+            <IconPlus size={13} /> Save to Notes
           </button>
         </div>
       )}
@@ -241,12 +241,12 @@ export default function ChatPanel({
           <span className="chat-grounding-tag">
             <span className="grounding-dot" />
             {sources.length === 0
-              ? 'No sources attached'
-              : `Grounded with all ${sources.length} ${sources.length === 1 ? 'source' : 'sources'}`}
+              ? 'No sources yet'
+              : `${activeSources.length} of ${sources.length} ${sources.length === 1 ? 'source' : 'sources'} active`}
           </span>
         </div>
         {messages.length > 0 && (
-          <button className="icon-btn" title="Clear chat history" onClick={onClearChat}>
+          <button className="icon-btn" title="Clear chat" onClick={onClearChat}>
             <IconTrash size={16} />
           </button>
         )}
@@ -258,11 +258,13 @@ export default function ChatPanel({
             <div className="welcome-avatar">
               <IconSparkles size={32} />
             </div>
-            <h3 className="welcome-heading">Chat with your research notebook</h3>
+            <h3 className="welcome-heading">
+              {activeSources.length > 0 ? 'Ready to answer your questions' : 'Add sources to get started'}
+            </h3>
             <p className="welcome-sub">
               {activeSources.length > 0
-                ? `Answers are synthesized by ${getModelLabel(selectedModel)} and grounded exclusively in your ${activeSources.length} active sources with source citations.`
-                : 'Upload or discover sources in the left panel to begin querying your notebook.'}
+                ? `Ask anything about your sources. Responses are grounded in the ${activeSources.length} active ${activeSources.length === 1 ? 'source' : 'sources'} and include citations.`
+                : 'Upload PDFs, paste a YouTube link, or add a web article using the panel on the left.'}
             </p>
 
             {activeSources.length > 0 && (
@@ -287,13 +289,13 @@ export default function ChatPanel({
                   {msg.role === 'assistant' && (
                     <div className="message-speaker-header">
                       <span className="assistant-badge">
-                        <IconSparkles size={13} /> Groq · {getModelLabel(msg.model || selectedModel)}
+                        <IconSparkles size={13} /> {getModelLabel(msg.model || selectedModel)}
                       </span>
                       <div className="message-quick-actions">
                         <button
                           className="msg-action-btn"
                           onClick={() => handleCopyMessage(msg.id || idx, msg.content)}
-                          title="Copy response"
+                          title="Copy"
                         >
                           {copiedId === (msg.id || idx) ? <IconCheck size={13} /> : <IconCopy size={13} />}
                         </button>
@@ -302,12 +304,12 @@ export default function ChatPanel({
                           onClick={() => {
                             if (onAddToNote) {
                               onAddToNote(msg.content);
-                              showToast('Appended full response to Research Notes!');
+                              showToast('Added to your notes');
                             }
                           }}
-                          title="Append entire response to Notes"
+                          title="Save to notes"
                         >
-                          <IconFileText size={13} /> <span>Add to Note</span>
+                          <IconFileText size={13} /> <span>Save to Notes</span>
                         </button>
                       </div>
                     </div>
@@ -319,7 +321,7 @@ export default function ChatPanel({
 
                   {msg.citations && msg.citations.length > 0 && (
                     <div className="message-citations-footer">
-                      <div className="citations-footer-label">Referenced Sources (click to inspect passage):</div>
+                      <div className="citations-footer-label">Sources cited</div>
                       <div className="citations-pills-row">
                         {msg.citations.map((c) => (
                           <button
@@ -353,7 +355,7 @@ export default function ChatPanel({
                     <span />
                     <span />
                   </div>
-                  <span className="loading-text">Synthesizing grounded answer with Groq LPU...</span>
+                  <span className="loading-text">Thinking…</span>
                 </div>
               </div>
             )}
@@ -366,7 +368,7 @@ export default function ChatPanel({
       {hoveredCitation && (
         <div className="floating-citation-card">
           <div className="floating-citation-header">
-            <span className="floating-num">Citation [{hoveredCitation.citation_index}]</span>
+            <span className="floating-num">[{hoveredCitation.citation_index}]</span>
             <span className="floating-title">{hoveredCitation.source_title}</span>
           </div>
           <p className="floating-snippet">{hoveredCitation.snippet}</p>
@@ -382,9 +384,9 @@ export default function ChatPanel({
                 <IconLock size={18} />
               </div>
               <div className="login-gate-text">
-                <div className="login-gate-title">Google Authentication Required to Chat</div>
+                <div className="login-gate-title">Sign in to chat</div>
                 <div className="login-gate-desc">
-                  Sign in with Google so your research chats and notebooks are saved exclusively under your account.
+                  Your conversations are saved to your account.
                 </div>
               </div>
             </div>
@@ -394,7 +396,7 @@ export default function ChatPanel({
               onClick={onGoogleSignIn}
             >
               <IconGoogle size={17} />
-              <span>Sign in with Google</span>
+              <span>Continue with Google</span>
             </button>
           </div>
         ) : (
@@ -404,9 +406,9 @@ export default function ChatPanel({
                 <div className="rate-limit-banner-content">
                   <span className="rate-limit-banner-icon">⚠️</span>
                   <div className="rate-limit-banner-text">
-                    <span className="rate-limit-banner-title">Rate Limit Reached ({rateLimitError.failedModel})</span>
+                    <span className="rate-limit-banner-title">Rate limit reached — {rateLimitError.failedModel}</span>
                     <span className="rate-limit-banner-desc">
-                      Too many requests for this model. Please select a different model from the list below and try again.
+                      Switch to a different model below and try again.
                     </span>
                   </div>
                 </div>
@@ -436,7 +438,7 @@ export default function ChatPanel({
 
             <div className="chat-input-toolbar">
               <div className="chat-model-selector-group">
-                <span className="model-selector-tag">Model:</span>
+                <span className="model-selector-tag">Model</span>
                 <select
                   className="chat-model-select"
                   value={selectedModel}
@@ -454,10 +456,12 @@ export default function ChatPanel({
                   ))}
                 </select>
               </div>
-              <div className="chat-input-sources-count">
-                <span className="sources-count-dot" />
-                {activeSources.length} active in context
-              </div>
+              {activeSources.length > 0 && (
+                <div className="chat-input-sources-count">
+                  <span className="sources-count-dot" />
+                  {activeSources.length} active {activeSources.length === 1 ? 'source' : 'sources'}
+                </div>
+              )}
             </div>
 
             <form onSubmit={handleSubmit} className="chat-input-form">
@@ -465,8 +469,8 @@ export default function ChatPanel({
                 className="chat-textarea"
                 placeholder={
                   activeSources.length === 0
-                    ? "Add at least one active source in the left panel to begin..."
-                    : `Ask a question grounded in your sources (using ${getModelLabel(selectedModel)})...`
+                    ? 'Add a source to start chatting…'
+                    : 'Ask a question about your sources…'
                 }
                 value={inputText}
                 onChange={(e) => setInputText(e.target.value)}
@@ -483,7 +487,7 @@ export default function ChatPanel({
               </button>
             </form>
             <div className="chat-input-hint">
-              {activeSources.length} sources active · Highlight any text to Add to Notes · Enter to send
+              Highlight text in any response to save it to your notes · Enter to send
             </div>
           </>
         )}

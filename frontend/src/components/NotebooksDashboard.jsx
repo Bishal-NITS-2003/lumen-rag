@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { IconLumen, IconPlus, IconTrash, IconBook, IconSparkles, IconLayers, IconLoader, IconGoogle } from './Icons';
+import { IconLumen, IconPlus, IconTrash, IconBook, IconLoader, IconGoogle } from './Icons';
 
 export default function NotebooksDashboard({
   notebooks = [],
@@ -10,7 +10,6 @@ export default function NotebooksDashboard({
   onCreateNotebook,
   onSelectNotebook,
   onDeleteNotebook,
-  systemHealth
 }) {
   const [newTitle, setNewTitle] = useState('');
   const [isCreating, setIsCreating] = useState(false);
@@ -34,32 +33,39 @@ export default function NotebooksDashboard({
     setShowModal(true);
   };
 
+  const greeting = () => {
+    const h = new Date().getHours();
+    if (h < 12) return 'Good morning';
+    if (h < 17) return 'Good afternoon';
+    return 'Good evening';
+  };
+
   return (
     <div className="dashboard-container">
-      {/* Top Banner */}
+      {/* Hero */}
       <div className="dashboard-hero">
         <div className="hero-branding">
-          <IconLumen size={36} />
+          <div className="hero-icon-wrap">
+            <IconLumen size={32} />
+          </div>
           <div>
-            <h1 className="hero-title">Lumen Notebooks</h1>
-            <p className="hero-sub">
-              Your personalized AI research workspace powered by Groq LPU & AWS RDS.
-            </p>
-          </div>
-        </div>
-
-        <div className="hero-stats-row">
-          <div className="hero-stat-pill">
-            <span className="stat-label">Model:</span>
-            <span className="stat-value">{systemHealth?.llm_engine || 'Groq Cloud LPU'}</span>
-          </div>
-          <div className="hero-stat-pill">
-            <span className="stat-label">Database:</span>
-            <span className="stat-value">{systemHealth?.database || 'PostgreSQL RDS Ready'}</span>
-          </div>
-          <div className="hero-stat-pill">
-            <span className="stat-label">Storage:</span>
-            <span className="stat-value">{systemHealth?.aws_s3_connected ? 'AWS S3 (Active)' : 'Local Storage Fallback'}</span>
+            {user ? (
+              <>
+                <h1 className="hero-title">
+                  {greeting()}, {user.displayName?.split(' ')[0] || 'there'} 👋
+                </h1>
+                <p className="hero-sub">
+                  Your research notebooks are ready. Pick one to continue, or start something new.
+                </p>
+              </>
+            ) : (
+              <>
+                <h1 className="hero-title">Welcome to Lumen Notebook</h1>
+                <p className="hero-sub">
+                  Your AI research workspace. Summarize papers, videos, and articles — grounded in the sources you choose.
+                </p>
+              </>
+            )}
           </div>
         </div>
       </div>
@@ -67,10 +73,9 @@ export default function NotebooksDashboard({
       {/* Action Bar */}
       <div className="dashboard-action-bar">
         <div className="dashboard-section-title">
-          <h2>All Notebooks</h2>
-          <span className="notebooks-count-badge">{notebooks.length}</span>
-          {!user && (
-            <span className="auth-prompt-badge">Sign in with Google to sync</span>
+          <h2>My Notebooks</h2>
+          {notebooks.length > 0 && (
+            <span className="notebooks-count-badge">{notebooks.length}</span>
           )}
         </div>
 
@@ -82,7 +87,7 @@ export default function NotebooksDashboard({
               onClick={onGoogleSignIn}
             >
               <IconGoogle size={15} />
-              <span>Sign in with Google</span>
+              <span>Sign in</span>
             </button>
           )}
           <button className="btn-primary" onClick={handleOpenCreateModal}>
@@ -114,8 +119,8 @@ export default function NotebooksDashboard({
               <div className="empty-icon-wrap">
                 <IconGoogle size={28} />
               </div>
-              <h3>Sign in with Google to view your notebooks</h3>
-              <p>Sign in to save, organize, and access your research notebooks and grounded AI chats.</p>
+              <h3>Sign in to get started</h3>
+              <p>Save and sync your research notebooks across devices.</p>
               <button
                 type="button"
                 className="btn-primary"
@@ -125,7 +130,7 @@ export default function NotebooksDashboard({
                   if (onGoogleSignIn) onGoogleSignIn();
                 }}
               >
-                <IconGoogle size={15} /> Sign in with Google
+                <IconGoogle size={15} /> Continue with Google
               </button>
             </div>
           ) : (
@@ -134,7 +139,7 @@ export default function NotebooksDashboard({
                 <IconPlus size={28} />
               </div>
               <h3>Create your first notebook</h3>
-              <p>Upload research papers, YouTube videos, or articles and synthesize with Groq LPU.</p>
+              <p>Add sources — PDFs, YouTube videos, or web articles — and start asking questions.</p>
             </div>
           )
         ) : (
@@ -151,14 +156,14 @@ export default function NotebooksDashboard({
                 <button
                   type="button"
                   className="notebook-delete-btn"
-                  title={deletingNotebookId === nb.id ? "Deleting..." : "Delete notebook"}
+                  title={deletingNotebookId === nb.id ? 'Deleting...' : 'Delete notebook'}
                   disabled={deletingNotebookId === nb.id}
                   onPointerDown={(e) => e.stopPropagation()}
                   onMouseDown={(e) => e.stopPropagation()}
                   onClick={(e) => {
                     e.preventDefault();
                     e.stopPropagation();
-                    if (window.confirm(`Delete notebook "${nb.title}"?`)) {
+                    if (window.confirm(`Delete "${nb.title}"? This cannot be undone.`)) {
                       onDeleteNotebook(nb.id);
                     }
                   }}
@@ -192,26 +197,27 @@ export default function NotebooksDashboard({
         <div className="modal-backdrop">
           <div className="modal-content" style={{ maxWidth: '440px' }}>
             <div className="modal-header">
-              <h3 className="modal-title">Create New Notebook</h3>
+              <h3 className="modal-title">New Notebook</h3>
               <button className="icon-btn" onClick={() => setShowModal(false)}>✕</button>
             </div>
             <form onSubmit={handleCreate} className="modal-body">
               <div className="form-group">
-                <label className="form-label">Notebook Title</label>
+                <label className="form-label">What are you researching?</label>
                 <input
                   type="text"
                   className="form-input"
-                  placeholder="e.g. LLM Reasoning Papers & Benchmarks"
+                  placeholder="e.g. Climate Policy 2024, LLM Research Papers…"
                   value={newTitle}
                   onChange={(e) => setNewTitle(e.target.value)}
                   autoFocus
                   required
                 />
+                <span className="form-hint">You can rename this anytime from inside the notebook.</span>
               </div>
               <div className="modal-footer" style={{ marginTop: '20px' }}>
                 <button type="button" className="btn-secondary" onClick={() => setShowModal(false)}>Cancel</button>
                 <button type="submit" className="btn-primary" disabled={!newTitle.trim() || isCreating}>
-                  {isCreating ? <IconLoader size={16} className="spin" /> : 'Create Notebook'}
+                  {isCreating ? <IconLoader size={16} className="spin" /> : 'Create'}
                 </button>
               </div>
             </form>
