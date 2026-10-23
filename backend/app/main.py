@@ -293,6 +293,7 @@ MAX_SOURCES_PER_NOTEBOOK = 5
 
 # ─── Sources Management ───────────────────────────────────────
 @app.post("/api/notebooks/{notebook_id}/sources/upload-batch", response_model=List[SourceResponse])
+@app.post("/api/notebooks/{notebook_id}/sources/upload-batch/", response_model=List[SourceResponse])
 async def upload_files_batch(
     notebook_id: str,
     files: List[UploadFile] = File(...),

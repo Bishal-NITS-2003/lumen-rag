@@ -43,6 +43,25 @@ def get_llm(temperature: float = 0.2, model_name: Optional[str] = None):
     )
 
 
+def extract_text_content(content: Any) -> str:
+    """Safely extracts a string from LLM message content whether it is str, list of dicts, or objects."""
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        parts = []
+        for part in content:
+            if isinstance(part, str):
+                parts.append(part)
+            elif isinstance(part, dict):
+                parts.append(part.get("text", ""))
+            elif hasattr(part, "text"):
+                parts.append(str(part.text))
+            else:
+                parts.append(str(part))
+        return "".join(parts).strip()
+    return str(content or "").strip()
+
+
 def generate_search_queries(prompt: str) -> List[str]:
     """
     Decomposes user topic into 3-5 high-yield search queries for YouTube and Web.
@@ -59,7 +78,7 @@ def generate_search_queries(prompt: str) -> List[str]:
         HumanMessage(content=f"Topic: {prompt}")
     ]
     resp = llm.invoke(messages)
-    text = resp.content.strip()
+    text = extract_text_content(resp.content)
 
     # Clean potential markdown block
     cleaned = re.sub(r"^```(?:json)?\s*", "", text, flags=re.MULTILINE)
@@ -90,7 +109,7 @@ def summarize_text(text: str, max_sentences: int = 2) -> str:
             SystemMessage(content=f"Summarize the following text in exactly {max_sentences} clear, factual sentences. Do not use conversational filler."),
             HumanMessage(content=text[:3500])
         ])
-        return resp.content.strip()
+        return extract_text_content(resp.content)
     except Exception as e:
         logger.warning(f"Summary generation failed: {e}")
         return text[:180] + "..."
@@ -176,19 +195,7 @@ def generate_grounded_answer(
             raise RuntimeError(f"RATE_LIMIT: Model rate limit reached for '{active_model}'. Please select a different model from the list above and try again.")
         raise e
 
-    # Safely extract text whether response.content is str, list of parts, or dicts
-    if isinstance(response.content, list):
-        text_parts = []
-        for part in response.content:
-            if isinstance(part, dict):
-                text_parts.append(part.get("text", ""))
-            elif hasattr(part, "text"):
-                text_parts.append(str(part.text))
-            else:
-                text_parts.append(str(part))
-        raw_answer = "".join(text_parts).strip()
-    else:
-        raw_answer = str(response.content).strip()
+    raw_answer = extract_text_content(response.content)
 
     # Clean potential DeepSeek-R1 <think> reasoning tokens
     answer_text = re.sub(r'<think>.*?</think>', '', raw_answer, flags=re.DOTALL).strip()
