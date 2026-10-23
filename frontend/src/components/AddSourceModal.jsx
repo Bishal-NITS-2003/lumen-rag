@@ -12,30 +12,39 @@ export default function AddSourceModal({ notebookId, isOpen, onClose, onSourceAd
   const maxSelectable = Math.min(5, remainingSlots);
   const isLimitReached = remainingSlots <= 0;
 
-  // File Upload State
-  const [selectedFile, setSelectedFile] = useState(null);
+  // File Upload State (Up to 5 files at once)
+  const [selectedFiles, setSelectedFiles] = useState([]);
   const [isUploading, setIsUploading] = useState(false);
 
-  // Link State
-  const [linkUrl, setLinkUrl] = useState('');
-  const [linkTitle, setLinkTitle] = useState('');
-  const [isAddingLink, setIsAddingLink] = useState(false);
+  const handleFilesSelected = (filesList) => {
+    const incoming = Array.from(filesList || []);
+    if (!incoming.length) return;
 
-  // Discover / Google Search State
-  const [prompt, setPrompt] = useState('');
-  const [isSearching, setIsSearching] = useState(false);
-  const [candidateResults, setCandidateResults] = useState(null);
-  const [selectedCandidates, setSelectedCandidates] = useState([]);
-  const [isAddingCandidates, setIsAddingCandidates] = useState(false);
-  const [candidateFilter, setCandidateFilter] = useState('all'); // 'all' | 'youtube' | 'web'
+    const current = [...selectedFiles];
+    let addedCount = 0;
+    for (const f of incoming) {
+      if (current.some(existing => existing.name === f.name && existing.size === f.size)) continue;
+      if (current.length >= maxSelectable) break;
+      current.push(f);
+      addedCount++;
+    }
 
-  const [errorMsg, setErrorMsg] = useState('');
+    if (incoming.length + selectedFiles.length > maxSelectable) {
+      setErrorMsg(`Notebook limit: You can attach at most ${maxSelectable} file(s) (maximum ${MAX_SOURCES} total per notebook).`);
+    } else {
+      setErrorMsg('');
+    }
+    setSelectedFiles(current);
+  };
 
-  if (!isOpen) return null;
+  const handleRemoveSelectedFile = (indexToRemove, e) => {
+    if (e) e.stopPropagation();
+    setSelectedFiles(prev => prev.filter((_, idx) => idx !== indexToRemove));
+  };
 
   const handleFileUpload = async (e) => {
     e.preventDefault();
-    if (!selectedFile) return;
+    if (selectedFiles.length === 0) return;
     if (isLimitReached) {
       setErrorMsg(`Notebook limit reached: Maximum ${MAX_SOURCES} sources allowed. Delete an existing source first.`);
       return;
@@ -44,19 +53,22 @@ export default function AddSourceModal({ notebookId, isOpen, onClose, onSourceAd
     setErrorMsg('');
 
     const formData = new FormData();
-    formData.append('file', selectedFile);
+    selectedFiles.forEach(f => {
+      formData.append('files', f);
+    });
 
     try {
-      const res = await fetch(`/api/notebooks/${notebookId}/sources/upload`, {
+      const res = await fetch(`/api/notebooks/${notebookId}/sources/upload-batch`, {
         method: 'POST',
         body: formData
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(err.detail || 'Upload failed');
+        throw new Error(err.detail || 'Batch upload failed');
       }
       const data = await res.json();
       onSourceAdded(data);
+      setSelectedFiles([]);
       onClose();
     } catch (err) {
       setErrorMsg(err.message);
@@ -388,60 +400,111 @@ export default function AddSourceModal({ notebookId, isOpen, onClose, onSourceAd
             </div>
           )}
 
-          {/* TAB 2: File Upload (PDF, TXT) */}
+          {/* TAB 2: File Upload (Up to 5 files at once, PDF, TXT, MD, Images) */}
           {activeTab === 'upload' && (
             <form onSubmit={handleFileUpload} className="tab-pane">
-              <div
-                className={`file-drop-zone ${selectedFile ? 'has-file' : ''} ${isLimitReached ? 'disabled' : ''}`}
-                onClick={() => {
-                  if (!isLimitReached) {
-                    document.getElementById('file-input-field').click();
+              <input
+                id="file-input-field"
+                type="file"
+                multiple
+                accept=".pdf,.txt,.md,.csv,.json,.png,.jpg,.jpeg,.webp"
+                style={{ display: 'none' }}
+                disabled={isLimitReached || selectedFiles.length >= maxSelectable}
+                onChange={(e) => {
+                  if (e.target.files && e.target.files.length > 0) {
+                    handleFilesSelected(e.target.files);
+                    e.target.value = '';
                   }
                 }}
-              >
-                <input
-                  id="file-input-field"
-                  type="file"
-                  accept=".pdf,.txt,.md"
-                  style={{ display: 'none' }}
-                  disabled={isLimitReached}
-                  onChange={(e) => {
-                    if (e.target.files && e.target.files[0]) {
-                      setSelectedFile(e.target.files[0]);
+              />
+
+              {selectedFiles.length === 0 ? (
+                <div
+                  className={`file-drop-zone ${isLimitReached ? 'disabled' : ''}`}
+                  onClick={() => {
+                    if (!isLimitReached) {
+                      document.getElementById('file-input-field').click();
                     }
                   }}
-                />
-                <div className="drop-icon-wrap">
-                  <IconUpload size={32} />
-                </div>
-                {selectedFile ? (
-                  <div className="selected-file-meta">
-                    <span className="file-name">{selectedFile.name}</span>
-                    <span className="file-size">({(selectedFile.size / 1024 / 1024).toFixed(2)} MB)</span>
+                  onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (!isLimitReached && e.dataTransfer.files) {
+                      handleFilesSelected(e.dataTransfer.files);
+                    }
+                  }}
+                >
+                  <div className="drop-icon-wrap">
+                    <IconUpload size={32} />
                   </div>
-                ) : (
-                  <>
-                    <div className="drop-title">
-                      {isLimitReached ? 'Maximum 5 Sources Reached' : 'Click to upload PDF, TXT, or MD'}
-                    </div>
-                    <div className="drop-sub">
-                      {isLimitReached ? 'Delete an existing source first to upload new documents.' : 'Saved directly to AWS S3 & indexed into private vector space'}
-                    </div>
-                  </>
-                )}
-              </div>
+                  <div className="drop-title">
+                    {isLimitReached
+                      ? 'Maximum 5 Sources Reached'
+                      : `Select up to ${maxSelectable} file${maxSelectable > 1 ? 's' : ''} from your computer`}
+                  </div>
+                  <div className="drop-sub">
+                    {isLimitReached
+                      ? 'Delete an existing source first to upload new documents.'
+                      : 'Upload up to 5 PDFs, scans, TXT, MD, or images at once with Fast OCR.'}
+                  </div>
+                </div>
+              ) : (
+                <div className="batch-selected-files-container">
+                  <div className="batch-files-header">
+                    <span className="batch-count-title">
+                      Selected Files ({selectedFiles.length} of {maxSelectable} max)
+                    </span>
+                    {selectedFiles.length < maxSelectable && (
+                      <button
+                        type="button"
+                        className="btn-add-more-files"
+                        onClick={() => document.getElementById('file-input-field').click()}
+                      >
+                        + Add more files
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="batch-files-list">
+                    {selectedFiles.map((file, idx) => (
+                      <div key={idx} className="batch-file-item">
+                        <div className="batch-file-left">
+                          <IconFileText size={18} className="batch-file-icon" />
+                          <div className="batch-file-info">
+                            <span className="batch-file-name" title={file.name}>{file.name}</span>
+                            <span className="batch-file-size">({(file.size / 1024 / 1024).toFixed(2)} MB)</span>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          className="btn-remove-batch-file"
+                          title="Remove file"
+                          onClick={(e) => handleRemoveSelectedFile(idx, e)}
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="batch-ocr-hint">
+                    ⚡ Fast OCR enabled for scanned pages and documents.
+                  </div>
+                </div>
+              )}
 
               <div className="modal-footer">
                 <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
                 <button
                   type="submit"
                   className="btn-primary"
-                  disabled={!selectedFile || isUploading || isLimitReached}
+                  disabled={selectedFiles.length === 0 || isUploading || isLimitReached}
                 >
                   {isUploading ? (
-                    <><IconLoader size={16} className="spin" /> Uploading to S3 & Indexing...</>
+                    <><IconLoader size={16} className="spin" /> Ingesting & OCR Processing ({selectedFiles.length} files)...</>
                   ) : (
-                    'Upload & Add Source'
+                    `Upload & Ingest ${selectedFiles.length > 0 ? selectedFiles.length : ''} Source${selectedFiles.length !== 1 ? 's' : ''}`
                   )}
                 </button>
               </div>

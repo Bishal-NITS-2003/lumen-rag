@@ -12,6 +12,15 @@ marked.setOptions({
   breaks: true,
 });
 
+export const AVAILABLE_MODELS = [
+  { id: 'openai/gpt-oss-120b', label: 'GPT OSS 120B' },
+  { id: 'qwen/qwen3.8-27b', label: 'Qwen 3.8 27B' },
+  { id: 'openai/gpt-oss-20b', label: 'GPT OSS 20B' },
+  { id: 'openai/gpt-oss-safeguard-20b', label: 'GPT Safeguard 20B' },
+  { id: 'meta-llama/llama-prompt-guard-2-86m', label: 'Llama Guard 86M' },
+  { id: 'meta-llama/llama-prompt-guard-2-22m', label: 'Llama Guard 22M' }
+];
+
 export default function ChatPanel({
   notebookTitle,
   messages = [],
@@ -25,6 +34,8 @@ export default function ChatPanel({
   onAddToNote
 }) {
   const [inputText, setInputText] = useState('');
+  const [selectedModel, setSelectedModel] = useState('openai/gpt-oss-120b');
+  const [rateLimitError, setRateLimitError] = useState(null);
   const [hoveredCitation, setHoveredCitation] = useState(null);
   const [selectionPopup, setSelectionPopup] = useState(null);
   const [copiedId, setCopiedId] = useState(null);
@@ -34,6 +45,11 @@ export default function ChatPanel({
   const chatContainerRef = useRef(null);
 
   const activeSources = sources.filter(s => s.is_active && s.extraction_status !== 'failed');
+
+  const getModelLabel = (modelId) => {
+    const found = AVAILABLE_MODELS.find(m => m.id === modelId);
+    return found ? found.label : (modelId || 'GPT OSS 120B');
+  };
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -80,15 +96,36 @@ export default function ChatPanel({
     setTimeout(() => setToastMsg(''), 2500);
   };
 
-  const handleSubmit = (e) => {
-    e.preventDefault();
+  const handleSubmit = async (e) => {
+    if (e) e.preventDefault();
     if (!user) {
       if (onGoogleSignIn) onGoogleSignIn();
       return;
     }
-    if (!inputText.trim() || isLoading) return;
-    onSendMessage(inputText.trim());
-    setInputText('');
+    const trimmed = inputText.trim();
+    if (!trimmed || isLoading) return;
+
+    setRateLimitError(null);
+    try {
+      await onSendMessage(trimmed, selectedModel);
+      setInputText('');
+    } catch (err) {
+      const errDetail = (err?.message || '').toLowerCase();
+      const is429 = err?.status === 429 ||
+        errDetail.includes('rate limit') ||
+        errDetail.includes('too many requests') ||
+        errDetail.includes('429');
+
+      if (is429) {
+        const curLabel = getModelLabel(selectedModel);
+        setRateLimitError({
+          failedModel: curLabel,
+          message: `Rate limit reached for ${curLabel}. Please switch to another model from the dropdown and try again.`
+        });
+      } else {
+        alert(`Chat query failed: ${err.message || 'Unknown error'}`);
+      }
+    }
   };
 
   const handleKeyDown = (e) => {
@@ -224,7 +261,7 @@ export default function ChatPanel({
             <h3 className="welcome-heading">Chat with your research notebook</h3>
             <p className="welcome-sub">
               {activeSources.length > 0
-                ? `Answers are synthesized by DeepSeek-R1 / Qwen Reasoning and grounded exclusively in your ${activeSources.length} active sources with source citations.`
+                ? `Answers are synthesized by ${getModelLabel(selectedModel)} and grounded exclusively in your ${activeSources.length} active sources with source citations.`
                 : 'Upload or discover sources in the left panel to begin querying your notebook.'}
             </p>
 
@@ -250,7 +287,7 @@ export default function ChatPanel({
                   {msg.role === 'assistant' && (
                     <div className="message-speaker-header">
                       <span className="assistant-badge">
-                        <IconSparkles size={13} /> Groq · Qwen Reasoning
+                        <IconSparkles size={13} /> Groq · {getModelLabel(msg.model || selectedModel)}
                       </span>
                       <div className="message-quick-actions">
                         <button
@@ -362,13 +399,74 @@ export default function ChatPanel({
           </div>
         ) : (
           <>
+            {rateLimitError && (
+              <div className="chat-rate-limit-banner">
+                <div className="rate-limit-banner-content">
+                  <span className="rate-limit-banner-icon">⚠️</span>
+                  <div className="rate-limit-banner-text">
+                    <span className="rate-limit-banner-title">Rate Limit Reached ({rateLimitError.failedModel})</span>
+                    <span className="rate-limit-banner-desc">
+                      Too many requests for this model. Please select a different model from the list below and try again.
+                    </span>
+                  </div>
+                </div>
+                <div className="rate-limit-banner-actions">
+                  <button
+                    type="button"
+                    className="btn-switch-model-quick"
+                    onClick={() => {
+                      const next = AVAILABLE_MODELS.find(m => m.id !== selectedModel) || AVAILABLE_MODELS[0];
+                      setSelectedModel(next.id);
+                      setRateLimitError(null);
+                    }}
+                  >
+                    Switch to {getModelLabel(AVAILABLE_MODELS.find(m => m.id !== selectedModel)?.id || '')}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-close-banner"
+                    onClick={() => setRateLimitError(null)}
+                    title="Dismiss"
+                  >
+                    ✕
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <div className="chat-input-toolbar">
+              <div className="chat-model-selector-group">
+                <span className="model-selector-tag">Model:</span>
+                <select
+                  className="chat-model-select"
+                  value={selectedModel}
+                  onChange={(e) => {
+                    setSelectedModel(e.target.value);
+                    if (rateLimitError) setRateLimitError(null);
+                  }}
+                  disabled={isLoading}
+                  title="Select AI Model"
+                >
+                  {AVAILABLE_MODELS.map(m => (
+                    <option key={m.id} value={m.id}>
+                      {m.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="chat-input-sources-count">
+                <span className="sources-count-dot" />
+                {activeSources.length} active in context
+              </div>
+            </div>
+
             <form onSubmit={handleSubmit} className="chat-input-form">
               <textarea
                 className="chat-textarea"
                 placeholder={
                   activeSources.length === 0
                     ? "Add at least one active source in the left panel to begin..."
-                    : "Ask a grounded question about your sources..."
+                    : `Ask a question grounded in your sources (using ${getModelLabel(selectedModel)})...`
                 }
                 value={inputText}
                 onChange={(e) => setInputText(e.target.value)}

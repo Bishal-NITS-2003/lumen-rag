@@ -76,9 +76,24 @@ class StorageService:
 
 storage_service = StorageService()
 
+_RAPID_OCR = None
+
+def get_rapid_ocr():
+    global _RAPID_OCR
+    if _RAPID_OCR is None:
+        try:
+            from rapidocr_onnxruntime import RapidOCR
+            _RAPID_OCR = RapidOCR()
+        except Exception as e:
+            logger.warning(f"RapidOCR initialization notice: {e}")
+    return _RAPID_OCR
+
 def parse_uploaded_document(file_bytes: bytes, filename: str) -> Tuple[str, int]:
     """
-    Extracts text content and word count from PDF, TXT, MD, etc.
+    Extracts text content and word count from PDF, TXT, MD, and image files.
+    Employs a high-speed hybrid strategy:
+    1. Direct digital text extraction for instant (<0.1s) parsing of text-based PDFs.
+    2. Blazing fast in-memory RapidOCR + pypdfium2 for scanned PDFs and image files.
     Returns: (extracted_text, word_count)
     """
     ext = os.path.splitext(filename)[1].lower()
@@ -86,14 +101,83 @@ def parse_uploaded_document(file_bytes: bytes, filename: str) -> Tuple[str, int]
 
     if ext == ".pdf":
         import io
-        pdf_file = io.BytesIO(file_bytes)
-        reader = PdfReader(pdf_file)
         page_texts = []
-        for i, page in enumerate(reader.pages):
-            page_content = page.extract_text() or ""
-            if page_content.strip():
-                page_texts.append(f"[Page {i+1}]\n{page_content.strip()}")
-        text = "\n\n".join(page_texts)
+        needs_ocr = False
+
+        # Step 1: Fast direct text extraction with pypdf
+        try:
+            pdf_file = io.BytesIO(file_bytes)
+            reader = PdfReader(pdf_file)
+            for i, page in enumerate(reader.pages):
+                page_content = (page.extract_text() or "").strip()
+                words = len(page_content.split())
+                if words >= 15:
+                    page_texts.append(f"[Page {i+1}]\n{page_content}")
+                else:
+                    # Page has few or no words, likely scanned document or slide
+                    needs_ocr = True
+        except Exception as e:
+            logger.warning(f"Direct PDF text extraction exception: {e}")
+            needs_ocr = True
+
+        total_extracted_words = sum(len(p.split()) for p in page_texts)
+
+        # If direct extraction yielded comprehensive text across all pages, use it directly
+        if total_extracted_words >= 50 and not needs_ocr:
+            text = "\n\n".join(page_texts)
+        else:
+            # Step 2: High-speed in-memory OCR via pypdfium2 + RapidOCR
+            try:
+                import pypdfium2 as pdfium
+                import numpy as np
+
+                ocr_engine = get_rapid_ocr()
+                if ocr_engine is not None:
+                    ocr_page_texts = []
+                    pdf = pdfium.PdfDocument(file_bytes)
+                    for i, page in enumerate(pdf):
+                        # If this page already had good digital text (> 35 words), keep it
+                        if i < len(page_texts) and len(page_texts[i].split()) > 35:
+                            ocr_page_texts.append(page_texts[i])
+                            continue
+
+                        # Render page at 1.5x resolution for fast & accurate OCR
+                        bitmap = page.render(scale=1.5)
+                        pil_img = bitmap.to_pil()
+                        img_arr = np.array(pil_img)
+                        result, _ = ocr_engine(img_arr)
+
+                        if result:
+                            lines = [line[1] for line in result if line and len(line) > 1 and line[1].strip()]
+                            page_str = "\n".join(lines).strip()
+                            if page_str:
+                                ocr_page_texts.append(f"[Page {i+1} (OCR)]\n{page_str}")
+
+                    if ocr_page_texts:
+                        text = "\n\n".join(ocr_page_texts)
+            except Exception as ocr_err:
+                logger.warning(f"RapidOCR PDF fallback failed ({ocr_err}). Falling back to raw text.")
+
+        # Fallback to direct page_texts if OCR was empty
+        if not text and page_texts:
+            text = "\n\n".join(page_texts)
+
+    elif ext in [".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tiff"]:
+        # Direct image OCR
+        try:
+            import io
+            from PIL import Image
+            import numpy as np
+            ocr_engine = get_rapid_ocr()
+            if ocr_engine:
+                pil_img = Image.open(io.BytesIO(file_bytes)).convert("RGB")
+                result, _ = ocr_engine(np.array(pil_img))
+                if result:
+                    lines = [line[1] for line in result if line and len(line) > 1 and line[1].strip()]
+                    text = "\n".join(lines).strip()
+        except Exception as img_err:
+            logger.warning(f"Image OCR failed: {img_err}")
+
     else:
         # Default txt / markdown / csv / json
         try:

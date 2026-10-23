@@ -210,11 +210,12 @@ export default function App() {
 
   // ── Source handlers ───────────────────────────────────────
   const handleSourceAdded = (newSource) => {
+    const newItems = Array.isArray(newSource) ? newSource : [newSource];
     setCurrentNotebook(prev => ({
       ...prev,
-      sources: [newSource, ...(prev?.sources || [])]
+      sources: [...newItems, ...(prev?.sources || [])]
     }));
-    setNotebooks(prev => prev.map(n => n.id === currentNotebookId ? { ...n, source_count: (n.source_count || 0) + 1 } : n));
+    setNotebooks(prev => prev.map(n => n.id === currentNotebookId ? { ...n, source_count: (n.source_count || 0) + newItems.length } : n));
   };
 
   const handleToggleSource = async (sourceId, isActive) => {
@@ -264,7 +265,7 @@ export default function App() {
   };
 
   // ── Chat handlers ─────────────────────────────────────────
-  const handleSendMessage = async (text) => {
+  const handleSendMessage = async (text, model = 'openai/gpt-oss-120b') => {
     if (!user) {
       const logged = await handleGoogleSignIn();
       if (!logged) {
@@ -294,23 +295,26 @@ export default function App() {
           'Content-Type': 'application/json',
           'X-User-Id': user ? user.uid : ''
         },
-        body: JSON.stringify({ message: text })
+        body: JSON.stringify({ message: text, model })
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(err.detail || 'Chat query failed');
+        const errorObj = new Error(err.detail || 'Chat query failed');
+        errorObj.status = res.status;
+        throw errorObj;
       }
       const assistantMsg = await res.json();
       setCurrentNotebook(prev => ({
         ...prev,
         messages: [...prev.messages.filter(m => m.id !== tempUserMsg.id), tempUserMsg, assistantMsg]
       }));
+      return { success: true };
     } catch (err) {
-      alert(`Chat error: ${err.message}`);
       setCurrentNotebook(prev => ({
         ...prev,
         messages: prev.messages.filter(m => m.id !== tempUserMsg.id)
       }));
+      throw err;
     } finally {
       setIsLoadingChat(false);
     }

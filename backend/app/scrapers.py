@@ -12,9 +12,20 @@ from app.schemas import CandidateSourceItem
 logger = logging.getLogger(__name__)
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
     "Accept-Language": "en-US,en;q=0.9",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Sec-Ch-Ua": '"Not/A)Brand";v="8", "Chromium";v="126", "Google Chrome";v="126"',
+    "Sec-Ch-Ua-Mobile": "?0",
+    "Sec-Ch-Ua-Platform": '"Windows"',
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "cross-site",
+    "Sec-Fetch-User": "?1",
+    "Upgrade-Insecure-Requests": "1",
+    "Referer": "https://www.google.com/",
+    "Cache-Control": "max-age=0",
 }
 
 def extract_youtube_video_id(url: str) -> Optional[str]:
@@ -179,19 +190,30 @@ async def fetch_youtube_transcript_text(url: str, title: str) -> Tuple[str, str,
 
 async def fetch_article_text(url: str, title: str) -> Tuple[str, str, Optional[str]]:
     """
-    Fetches and cleans article HTML text using browser headers and readability parsing.
+    Fetches and cleans article HTML text using realistic human browser headers and readability parsing.
     Returns: (content, extraction_status, extraction_error)
     """
     try:
-        async with httpx.AsyncClient(headers=HEADERS, timeout=3.5, follow_redirects=True) as client:
+        async with httpx.AsyncClient(headers=HEADERS, timeout=8.0, follow_redirects=True) as client:
             resp = await client.get(url)
+            
+            # If blocked with 403, try once with mobile user agent
+            if resp.status_code in (403, 401):
+                mobile_headers = {
+                    **HEADERS,
+                    "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1",
+                    "Sec-Ch-Ua-Mobile": "?1",
+                    "Sec-Ch-Ua-Platform": '"iOS"'
+                }
+                resp = await client.get(url, headers=mobile_headers)
+
             if resp.status_code == 200:
                 cleaned = clean_html_text(resp.text)
                 words = len(cleaned.split())
-                if words >= 50:
+                if words >= 40:
                     header = f"=== Article: {title} ===\nSource URL: {url}\n\n"
                     return header + cleaned, "success", None
-                elif words >= 20:
+                elif words >= 15:
                     header = f"=== Article: {title} ===\nSource URL: {url}\n\n"
                     return header + cleaned, "partial", "Limited text extracted from webpage."
                 else:

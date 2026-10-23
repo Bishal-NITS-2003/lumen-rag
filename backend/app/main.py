@@ -9,21 +9,19 @@ from sqlalchemy.orm import Session
 
 from .config import settings
 from .database import get_db, init_db
-from .models import Notebook, Source, ChatMessage, StudioNote, DocumentChunk, NotebookNote
+from .models import Notebook, Source, ChatMessage, DocumentChunk, NotebookNote
 from .schemas import (
     NotebookCreate, NotebookUpdate, NotebookResponse, NotebookDetailResponse,
     SourceResponse, SourceDetailResponse, SourceToggleRequest,
     AddUrlSourceRequest, GenerateSourcesRequest, CandidateSourcesResponse, CandidateSourceItem,
     AddSelectedSourcesRequest, ChatRequest, ChatMessageResponse,
-    NoteResponse, NoteUpdateRequest, NoteAppendRequest,
-    GenerateStudioNoteRequest, StudioNoteResponse
+    NoteResponse, NoteUpdateRequest, NoteAppendRequest
 )
 from .aws_service import storage_service, parse_uploaded_document
 from .rag import index_source, delete_source_index, retrieve_context_chunks
 from .llm import (
     summarize_text,
-    generate_grounded_answer,
-    generate_studio_note
+    generate_grounded_answer
 )
 from .scrapers import (
     discover_google_sources,
@@ -40,8 +38,8 @@ init_db()
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
-    description="Full-stack AI Research Assistant modeled after Google NotebookLM with DeepSeek-R1 / Qwen / Llama and AWS integration.",
-    version="2.1.0"
+    description="Full-stack AI Research Assistant modeled after Google NotebookLM with Groq Open Source LLM models and AWS integration.",
+    version="2.2.0"
 )
 
 app.add_middleware(
@@ -57,13 +55,14 @@ app.add_middleware(
 @app.get("/api/health")
 def health_check():
     active_llm = (
-        f"Groq Cloud ({getattr(settings, 'GROQ_MODEL', 'deepseek-r1-distill-llama-70b')})"
+        f"Groq Cloud ({getattr(settings, 'GROQ_MODEL', 'openai/gpt-oss-120b')})"
         if settings.GROQ_API_KEY
         else "Groq (API key required in .env)"
     )
     return {
         "status": "healthy",
         "llm_engine": active_llm,
+        "default_model": getattr(settings, "GROQ_MODEL", "openai/gpt-oss-120b"),
         "database": "PostgreSQL (AWS RDS)" if "postgresql" in settings.DATABASE_URL else "SQLite (Local/Resilient)",
         "aws_s3_connected": storage_service.use_s3,
         "aws_region": settings.AWS_REGION if storage_service.use_s3 else "local-storage"
@@ -79,19 +78,6 @@ def list_notebooks(
     # Strict isolation: If user is logged out, return empty list
     if not x_user_id or not x_user_id.strip():
         return []
-
-    # Assign any legacy unassigned notebooks (NULL user_id) to this user so data isn't lost
-    try:
-        orphan_count = db.query(Notebook).filter(Notebook.user_id == None).count()
-        if orphan_count > 0:
-            db.query(Notebook).filter(Notebook.user_id == None).update(
-                {Notebook.user_id: x_user_id.strip()},
-                synchronize_session=False
-            )
-            db.commit()
-    except Exception as e:
-        logger.warning(f"Error migrating legacy notebooks: {e}")
-        db.rollback()
 
     notebooks = (
         db.query(Notebook)
@@ -308,6 +294,68 @@ def append_to_notebook_note(notebook_id: str, payload: NoteAppendRequest, db: Se
 MAX_SOURCES_PER_NOTEBOOK = 5
 
 # ─── Sources Management ───────────────────────────────────────
+@app.post("/api/notebooks/{notebook_id}/sources/upload-batch", response_model=List[SourceResponse])
+async def upload_files_batch(
+    notebook_id: str,
+    files: List[UploadFile] = File(...),
+    db: Session = Depends(get_db)
+):
+    """Uploads up to 5 documents (PDF, TXT, MD, images) in a single batch, indexes each, and saves to S3/local."""
+    nb = db.query(Notebook).filter(Notebook.id == notebook_id).first()
+    if not nb:
+        raise HTTPException(status_code=404, detail="Notebook not found")
+
+    current_count = len(nb.sources)
+    if current_count + len(files) > MAX_SOURCES_PER_NOTEBOOK:
+        slots_left = max(0, MAX_SOURCES_PER_NOTEBOOK - current_count)
+        raise HTTPException(
+            status_code=400,
+            detail=f"Notebook limit exceeded: You have {current_count} sources and can upload at most {slots_left} more (maximum {MAX_SOURCES_PER_NOTEBOOK} total)."
+        )
+
+    results = []
+    for f in files:
+        file_bytes = await f.read()
+        if not file_bytes:
+            continue
+        try:
+            text_content, word_count = parse_uploaded_document(file_bytes, f.filename)
+            if not text_content.strip():
+                text_content = f"Source Document: {f.filename}\n[Notice: Document contains no extractable or readable text.]"
+                word_count = len(text_content.split())
+
+            file_path, s3_key = storage_service.save_file(file_bytes, f.filename)
+            summary = text_content[:220].strip() + "..." if len(text_content) > 220 else text_content.strip()
+
+            source = Source(
+                notebook_id=notebook_id,
+                title=f.filename,
+                source_type="pdf" if f.filename.lower().endswith(".pdf") else "document",
+                file_path=file_path,
+                s3_key=s3_key,
+                summary=summary,
+                content=text_content,
+                word_count=word_count,
+                is_active=True,
+                extraction_status="success",
+                extraction_error=None
+            )
+            db.add(source)
+            db.commit()
+            db.refresh(source)
+
+            index_source(db, notebook_id, source.id, source.title, text_content)
+            results.append(source)
+        except Exception as e:
+            logger.error(f"Error processing batch upload file {f.filename}: {e}")
+            db.rollback()
+
+    if not results:
+        raise HTTPException(status_code=400, detail="Failed to parse or save any of the uploaded files.")
+
+    return results
+
+
 @app.post("/api/notebooks/{notebook_id}/sources/upload", response_model=SourceResponse)
 async def upload_file_source(
     notebook_id: str,
@@ -329,10 +377,11 @@ async def upload_file_source(
     if not file_bytes:
         raise HTTPException(status_code=400, detail="Uploaded file is empty.")
 
-    # 1. Parse document text
+    # 1. Parse document text with fast OCR fallback
     text_content, word_count = parse_uploaded_document(file_bytes, file.filename)
     if not text_content.strip():
-        raise HTTPException(status_code=400, detail="Could not extract readable text from uploaded file.")
+        text_content = f"Source Document: {file.filename}\n[Notice: Document contains no extractable or readable text.]"
+        word_count = len(text_content.split())
 
     # 2. Save to AWS S3 or local storage
     file_path, s3_key = storage_service.save_file(file_bytes, file.filename)
@@ -614,11 +663,13 @@ def chat_with_notebook(
         ).order_by(ChatMessage.created_at.desc()).limit(8).all()
         history = [{"role": m.role, "content": m.content} for m in reversed(recent_msgs[:-1])]
 
-        # Generate answer with DeepSeek-R1 / Qwen / Gemini & citations
+        # Generate answer with selected Groq model & citations
+        selected_model = payload.model or getattr(settings, "GROQ_MODEL", "openai/gpt-oss-120b")
         answer_text, citations = generate_grounded_answer(
             query=user_query,
             chunks=chunks,
-            conversation_history=history
+            conversation_history=history,
+            model_name=selected_model
         )
 
         # Save Assistant message in DB
@@ -638,63 +689,24 @@ def chat_with_notebook(
             role=assistant_msg.role,
             content=assistant_msg.content,
             citations=citations,
+            model=selected_model,
             created_at=assistant_msg.created_at
         )
+    except HTTPException:
+        db.rollback()
+        raise
     except Exception as e:
         logger.error(f"Chat error in chat_with_notebook: {e}", exc_info=True)
         db.rollback()
+        err_str = str(e)
+        if "RATE_LIMIT" in err_str or "429" in err_str or "too many requests" in err_str.lower():
+            clean_msg = err_str.replace("RATE_LIMIT: ", "").strip()
+            raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=clean_msg)
         raise HTTPException(status_code=500, detail=f"Chat query failed: {str(e)}")
 
 
 @app.delete("/api/notebooks/{notebook_id}/chat", status_code=status.HTTP_204_NO_CONTENT)
 def clear_chat_history(notebook_id: str, db: Session = Depends(get_db)):
     db.query(ChatMessage).filter(ChatMessage.notebook_id == notebook_id).delete()
-    db.commit()
-    return None
-
-
-# ─── Legacy Studio Endpoints (Preserved for compatibility) ────
-@app.post("/api/notebooks/{notebook_id}/studio/generate", response_model=StudioNoteResponse)
-def create_studio_note(
-    notebook_id: str,
-    payload: GenerateStudioNoteRequest,
-    db: Session = Depends(get_db)
-):
-    nb = db.query(Notebook).filter(Notebook.id == notebook_id).first()
-    if not nb:
-        raise HTTPException(status_code=404, detail="Notebook not found")
-
-    active_sources = [s for s in nb.sources if s.is_active and s.extraction_status != "failed"]
-    if not active_sources:
-        raise HTTPException(status_code=400, detail="No active sources in notebook to generate from.")
-
-    combined_text = "\n\n=== SOURCE ===\n\n".join([
-        f"Title: {s.title}\n{s.content[:3500]}" for s in active_sources
-    ])
-
-    title, note_content = generate_studio_note(
-        note_type=payload.note_type,
-        sources_text=combined_text,
-        custom_prompt=payload.custom_prompt
-    )
-
-    studio_note = StudioNote(
-        notebook_id=notebook_id,
-        note_type=payload.note_type,
-        title=title,
-        content=note_content
-    )
-    db.add(studio_note)
-    db.commit()
-    db.refresh(studio_note)
-    return studio_note
-
-
-@app.delete("/api/notebooks/{notebook_id}/studio/{note_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_studio_note(notebook_id: str, note_id: str, db: Session = Depends(get_db)):
-    note = db.query(StudioNote).filter(StudioNote.id == note_id, StudioNote.notebook_id == notebook_id).first()
-    if not note:
-        raise HTTPException(status_code=404, detail="Studio note not found")
-    db.delete(note)
     db.commit()
     return None

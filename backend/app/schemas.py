@@ -57,6 +57,7 @@ class ChatMessageResponse(BaseModel):
     role: str
     content: str
     citations: List[CitationItem] = []
+    model: Optional[str] = None
     created_at: datetime
 
     class Config:
@@ -146,6 +147,7 @@ class SourceToggleRequest(BaseModel):
 
 class ChatRequest(BaseModel):
     message: str
+    model: Optional[str] = "openai/gpt-oss-120b"
     source_ids: Optional[List[str]] = None  # None means use all active sources
 
 class GenerateStudioNoteRequest(BaseModel):

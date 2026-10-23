@@ -2,24 +2,34 @@ import os
 import json
 import logging
 import re
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional
 from langchain_core.messages import SystemMessage, HumanMessage
 from .config import settings
 
 logger = logging.getLogger(__name__)
 
-def get_llm(temperature: float = 0.2):
+AVAILABLE_GROQ_MODELS = [
+    "openai/gpt-oss-120b",
+    "qwen/qwen3.8-27b",
+    "openai/gpt-oss-20b",
+    "openai/gpt-oss-safeguard-20b",
+    "meta-llama/llama-prompt-guard-2-86m",
+    "meta-llama/llama-prompt-guard-2-22m"
+]
+
+def get_llm(temperature: float = 0.2, model_name: Optional[str] = None):
     """
     Returns the cloud-hosted Open Source LLM engine via Groq:
-    DeepSeek-R1 Distill 70B (or Llama 3.3 70B / Qwen 2.5).
+    Supports dynamic user-selected models: openai/gpt-oss-120b, qwen/qwen3.8-27b, etc.
     Runs on Groq LPUs with ~300 tok/sec, imposing 0 CPU/GPU load on the AWS server.
     """
     if settings.GROQ_API_KEY:
         try:
             from langchain_groq import ChatGroq
+            active_model = model_name or getattr(settings, "GROQ_MODEL", "openai/gpt-oss-120b")
             return ChatGroq(
                 groq_api_key=settings.GROQ_API_KEY,
-                model_name=getattr(settings, "GROQ_MODEL", "qwen/qwen3.8-27b"),
+                model_name=active_model,
                 temperature=temperature,
                 max_tokens=4096
             )
@@ -89,13 +99,15 @@ def summarize_text(text: str, max_sentences: int = 2) -> str:
 def generate_grounded_answer(
     query: str,
     chunks: List[Dict[str, Any]],
-    conversation_history: List[Dict[str, str]]
+    conversation_history: List[Dict[str, str]],
+    model_name: Optional[str] = None
 ) -> Tuple[str, List[Dict[str, Any]]]:
     """
     Generates grounded RAG response with exact bracketed citations [1], [2]
-    matching the supplied source chunks using an Open Source LLM (DeepSeek-R1 / LLaMA / Qwen).
+    matching the supplied source chunks using the selected Open Source LLM via Groq.
     """
-    llm = get_llm(temperature=0.2)
+    active_model = model_name or getattr(settings, "GROQ_MODEL", "openai/gpt-oss-120b")
+    llm = get_llm(temperature=0.2, model_name=active_model)
 
     if not chunks:
         # No sources available
@@ -155,7 +167,14 @@ def generate_grounded_answer(
 
     all_messages = [SystemMessage(content=system_instruction)] + history_msgs + [HumanMessage(content=current_prompt)]
 
-    response = llm.invoke(all_messages)
+    try:
+        response = llm.invoke(all_messages)
+    except Exception as e:
+        err_msg = str(e)
+        if "429" in err_msg or "rate_limit" in err_msg.lower() or "too many requests" in err_msg.lower():
+            logger.warning(f"Rate limit exceeded on Groq model {active_model}: {e}")
+            raise RuntimeError(f"RATE_LIMIT: Model rate limit reached for '{active_model}'. Please select a different model from the list above and try again.")
+        raise e
 
     # Safely extract text whether response.content is str, list of parts, or dicts
     if isinstance(response.content, list):
@@ -183,72 +202,3 @@ def generate_grounded_answer(
         used_citations = citations_map[:3]  # fallback to top relevant if model forgot brackets
 
     return answer_text, used_citations
-
-
-def generate_studio_note(note_type: str, sources_text: str, custom_prompt: str = None) -> Tuple[str, str]:
-    """
-    Generates research artifacts using the Open Source LLM:
-    - Study Guide
-    - Briefing Doc
-    - FAQ
-    - Audio Overview Script
-    """
-    llm = get_llm(temperature=0.3)
-
-    prompts = {
-        "study_guide": (
-            "Generate a comprehensive, academic **Study Guide** based on the sources provided. "
-            "Include: \n"
-            "1. Core Concepts & Overview\n"
-            "2. In-Depth Topic Breakdown\n"
-            "3. Key Terms & Definitions (Glossary)\n"
-            "4. Practice / Review Questions with Answers\n"
-            "Use clear Markdown formatting with headers and bullet points."
-        ),
-        "briefing_doc": (
-            "Generate a professional **Executive Briefing Document** based on the sources provided. "
-            "Include:\n"
-            "1. Executive Summary\n"
-            "2. Key Findings & Data Points\n"
-            "3. Strategic Implications & Opportunities\n"
-            "4. Recommended Action Items\n"
-            "Use formal, analytical language."
-        ),
-        "faq": (
-            "Generate a comprehensive **Frequently Asked Questions (FAQ)** document based on the sources provided. "
-            "Provide 8-10 high-value questions that someone studying this material would ask, followed by detailed, accurate answers drawn directly from the text."
-        ),
-        "audio_overview": (
-            "Generate a lively, conversational **Audio Overview (Podcast Deep Dive) Script** between two hosts: "
-            "Alex (curious, analytical host) and Jordan (subject-matter explainer). "
-            "They should break down the key ideas from the sources in an engaging, natural, easy-to-understand conversational manner, "
-            "just like Google NotebookLM's Audio Overview podcast. Format with host dialogue tags like **Alex:** and **Jordan:**."
-        )
-    }
-
-    base_instruction = prompts.get(note_type, "Synthesize the provided sources into a structured, informative reference document.")
-    if custom_prompt:
-        base_instruction += f"\nAdditional User Instructions: {custom_prompt}"
-
-    system_msg = (
-        "You are an expert AI research analyst for Lumen Notebook. "
-        "Create an exceptionally thorough, high-quality document based STRICTLY on the source text provided below. "
-        "Structure your response with clear Markdown."
-    )
-
-    user_msg = f"{base_instruction}\n\nSOURCES TEXT:\n{sources_text[:12000]}"
-
-    resp = llm.invoke([
-        SystemMessage(content=system_msg),
-        HumanMessage(content=user_msg)
-    ])
-
-    title_map = {
-        "study_guide": "Study Guide",
-        "briefing_doc": "Executive Briefing Doc",
-        "faq": "Frequently Asked Questions",
-        "audio_overview": "Audio Overview Podcast Script"
-    }
-
-    title = title_map.get(note_type, "Notebook Note")
-    return title, resp.content.strip()
