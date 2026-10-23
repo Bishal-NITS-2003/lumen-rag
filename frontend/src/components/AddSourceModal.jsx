@@ -16,6 +16,21 @@ export default function AddSourceModal({ notebookId, isOpen, onClose, onSourceAd
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [isUploading, setIsUploading] = useState(false);
 
+  // Link State
+  const [linkUrl, setLinkUrl] = useState('');
+  const [linkTitle, setLinkTitle] = useState('');
+  const [isAddingLink, setIsAddingLink] = useState(false);
+
+  // Discover / Google Search State
+  const [prompt, setPrompt] = useState('');
+  const [isSearching, setIsSearching] = useState(false);
+  const [candidateResults, setCandidateResults] = useState(null);
+  const [selectedCandidates, setSelectedCandidates] = useState([]);
+  const [isAddingCandidates, setIsAddingCandidates] = useState(false);
+  const [candidateFilter, setCandidateFilter] = useState('all'); // 'all' | 'youtube' | 'web'
+
+  const [errorMsg, setErrorMsg] = useState('');
+
   const handleFilesSelected = (filesList) => {
     const incoming = Array.from(filesList || []);
     if (!incoming.length) return;
