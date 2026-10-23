@@ -79,17 +79,6 @@ class NoteUpdateRequest(BaseModel):
 class NoteAppendRequest(BaseModel):
     text: str
 
-class StudioNoteResponse(BaseModel):
-    id: str
-    notebook_id: str
-    note_type: str
-    title: str
-    content: str
-    created_at: datetime
-
-    class Config:
-        from_attributes = True
-
 class NotebookResponse(BaseModel):
     id: str
     user_id: Optional[str] = None
@@ -110,7 +99,6 @@ class NotebookDetailResponse(BaseModel):
     sources: List[SourceResponse] = []
     messages: List[ChatMessageResponse] = []
     manual_note: Optional[NoteResponse] = None
-    notes: List[StudioNoteResponse] = []
     created_at: datetime
     updated_at: datetime
 
@@ -149,7 +137,3 @@ class ChatRequest(BaseModel):
     message: str
     model: Optional[str] = "openai/gpt-oss-120b"
     source_ids: Optional[List[str]] = None  # None means use all active sources
-
-class GenerateStudioNoteRequest(BaseModel):
-    note_type: str  # 'study_guide', 'briefing_doc', 'faq', 'audio_overview'
-    custom_prompt: Optional[str] = None

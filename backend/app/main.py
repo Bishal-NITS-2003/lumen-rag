@@ -221,7 +221,6 @@ def delete_notebook(
         db.query(DocumentChunk).filter(DocumentChunk.notebook_id == notebook_id).delete(synchronize_session=False)
         db.query(ChatMessage).filter(ChatMessage.notebook_id == notebook_id).delete(synchronize_session=False)
         db.query(NotebookNote).filter(NotebookNote.notebook_id == notebook_id).delete(synchronize_session=False)
-        db.query(StudioNote).filter(StudioNote.notebook_id == notebook_id).delete(synchronize_session=False)
         db.query(Source).filter(Source.notebook_id == notebook_id).delete(synchronize_session=False)
 
         db.delete(nb)
