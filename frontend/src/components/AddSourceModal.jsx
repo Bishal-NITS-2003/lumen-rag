@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   IconX, IconUpload, IconUploadCloud, IconFileUp, IconFileText,
   IconLink, IconSparkles, IconLoader, IconCheck, IconCheckCircle,
@@ -32,6 +32,15 @@ export default function AddSourceModal({ notebookId, isOpen, onClose, onSourceAd
   const [candidateFilter, setCandidateFilter] = useState('all'); // 'all' | 'youtube' | 'web'
 
   const [errorMsg, setErrorMsg] = useState('');
+
+  // Automatically reset error message and active upload state when modal is opened
+  useEffect(() => {
+    if (isOpen) {
+      setErrorMsg('');
+      setSelectedFiles([]);
+      setIsUploading(false);
+    }
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -136,8 +145,9 @@ export default function AddSourceModal({ notebookId, isOpen, onClose, onSourceAd
         throw new Error(err.detail || 'Upload failed. Please check the file and try again.');
       }
       const data = await res.json();
-      onSourceAdded(data);
+      setErrorMsg('');
       setSelectedFiles([]);
+      onSourceAdded(data);
       onClose();
     } catch (err) {
       setErrorMsg(err.message);
@@ -241,6 +251,7 @@ export default function AddSourceModal({ notebookId, isOpen, onClose, onSourceAd
         throw new Error(err.detail || 'Failed to add selected sources');
       }
       const addedList = await res.json();
+      setErrorMsg('');
       addedList.forEach(s => onSourceAdded(s));
       onClose();
     } catch (err) {
