@@ -31,7 +31,11 @@ class Settings(BaseSettings):
     # Local Storage fallback
     STORAGE_DIR: str = os.getenv("STORAGE_DIR", "./storage/uploads").strip()
     
-    CORS_ORIGINS: List[str] = ["http://localhost:5173", "http://127.0.0.1:5173", "*"]
+    CORS_ORIGINS: List[str] = [
+        "https://lumen-rag-orcin.vercel.app",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ]
 
     class Config:
         env_file = ".env"
