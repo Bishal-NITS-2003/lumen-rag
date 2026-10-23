@@ -31,6 +31,8 @@ export default function AddSourceModal({ notebookId, isOpen, onClose, onSourceAd
 
   const [errorMsg, setErrorMsg] = useState('');
 
+  if (!isOpen) return null;
+
   const handleFilesSelected = (filesList) => {
     const incoming = Array.from(filesList || []);
     if (!incoming.length) return;
